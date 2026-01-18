@@ -35,7 +35,7 @@
     "step": {
       "menu": {
         "title": "Smarter Flair Vents options",
-        "description": "Choose which settings to configure. Start with DAB & polling, then map thermostats and sensors."
+        "description": "Choose which settings to configure. Start with DAB & polling, then map thermostats and sensors.\n\nSupport the project: https://github.com/sponsors/ljbotero"
       },
       "algorithm_settings": {
         "title": "Algorithm & polling",

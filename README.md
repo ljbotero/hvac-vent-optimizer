@@ -1,11 +1,24 @@
-Smarter Flair Vents custom integration (work in progress).
+Smarter Flair Vents is a Home Assistant custom integration for Flair Smart Vents and
+Pucks, with optional Dynamic Airflow Balancing (DAB). Configuration is handled via the
+UI config flow and options flow.
 
-This integration targets Flair Smart Vents and Pucks with optional Dynamic Airflow
-Balancing (DAB). Configuration is handled via the UI config flow and options flow.
+## Install (HACS)
 
-## Efficiency visualization (HA)
+### HACS custom repository (recommended)
+1) HACS -> Settings -> Custom repositories -> Add
+2) Repository: https://github.com/ljbotero/smarter-flair-vents
+3) Category: Integration
+4) Install and restart Home Assistant
 
-To mirror Hubitat's "Discovered devices" efficiency list, the integration exposes
+## Support
+
+If you'd like to support development, you can sponsor via GitHub Sponsors:
+https://github.com/sponsors/ljbotero
+
+## Efficiency visualization (Home Assistant)
+
+If you are coming from Hubitat, this mirrors the "Discovered devices" efficiency list.
+The integration exposes
 two extra sensors per vent:
 
 - `<vent name> Cooling Efficiency` (%)
@@ -30,8 +43,9 @@ entities:
     name: Master Bedroom Heating
 ```
 
-Below is a thorough feature inventory derived from the Hubitat implementation that
-we are porting. It is grouped into functional features and non-functional behaviors.
+Below is a feature inventory derived from the original Hubitat implementation. It is
+retained as a parity checklist for the Home Assistant port and grouped into functional
+features and non-functional behaviors.
 
 ## Configuration guide (user-friendly)
 
@@ -45,20 +59,20 @@ When you add the integration:
 ### Options (Options Flow)
 
 **Algorithm & Polling Settings**
-- **Use Dynamic Airflow Balancing (DAB)**: Enables the adaptive vent‑balancing algorithm.
+- **Use Dynamic Airflow Balancing (DAB)**: Enables the adaptive vent-balancing algorithm.
   - If disabled, vents are not automatically adjusted by the integration.
 - **Force structure mode to manual**: When DAB is enabled, force Flair structure mode to
   `manual` to allow vent control. Disable if you prefer to keep Flair in `auto` and
   understand that DAB may not work reliably.
 - **Close vents in inactive rooms**: If enabled, DAB will close vents for rooms marked
-  inactive (Flair “away” rooms).
+  inactive (Flair "away" rooms).
 - **Vent adjustment granularity (%)**: Rounds vent changes to a set increment (5/10/25/50/100).
   - Smaller values = finer control, more frequent adjustments.
   - Larger values = fewer adjustments, less vent wear.
 - **Polling interval (active HVAC)**: How often data is refreshed while heating/cooling.
 - **Polling interval (idle HVAC)**: How often data is refreshed while idle.
 - **Initial efficiency percent**: Starting efficiency value used until real rates are learned.
-- **Notify on efficiency adjustments**: Optional HA notification whenever DAB updates a room’s efficiency.
+- **Notify on efficiency adjustments**: Optional HA notification whenever DAB updates a room's efficiency.
 - **Log efficiency adjustments**: Add an entry to the Logbook whenever efficiency changes.
 
 **Vent Assignments**
@@ -68,7 +82,7 @@ When you add the integration:
   specific HA sensor (e.g., room sensor).
 
 **Conventional Vent Counts**
-- **Conventional vents per thermostat**: Number of non‑Flair (standard) vents on that HVAC
+- **Conventional vents per thermostat**: Number of non-Flair (standard) vents on that HVAC
   system. Used to prevent total airflow from dropping too low when DAB closes vents.
 
 ## Services
@@ -134,7 +148,7 @@ and want them to appear immediately:
 service: smarter_flair_vents.refresh_devices
 ```
 
-## Functional features (Hubitat baseline)
+## Functional features (Hubitat parity reference)
 
 ### Authentication & API access
 - OAuth 2.0 client-credentials authentication against `https://api.flair.co`.
@@ -145,14 +159,14 @@ service: smarter_flair_vents.refresh_devices
 - Discover structures and select a structure for control.
 - Discover vents and pucks:
   - Primary: `/structures/{id}/vents`, `/structures/{id}/pucks`.
-  - Fallback: `/rooms?include=pucks` and `/pucks` (Hubitat used both).
+  - Fallback: `/rooms-include=pucks` and `/pucks` (Hubitat used both).
 - Map to device entities:
   - Vents: percent-open control + readings.
   - Pucks: temperature, humidity, battery, motion/occupancy, signal metrics.
 
 ### Vent data & control
 - Read vent attributes: percent-open, duct temperature, duct pressure, voltage, RSSI.
-- Set vent position (0–100%).
+- Set vent position (0-100%).
 - Maintain unique IDs, names, and per-vent state.
 - Expose room metadata on vent entities (room id, name, setpoint, occupancy, etc.).
 
@@ -191,7 +205,7 @@ service: smarter_flair_vents.refresh_devices
 - JSON export of learned efficiency data (rates per room).
 - JSON import with validation and matching by room ID or name.
 
-## Non-functional behaviors (Hubitat baseline)
+## Non-functional behaviors (Hubitat parity reference)
 
 ### Performance & concurrency
 - Throttling for API calls to avoid rate limits:
@@ -218,11 +232,11 @@ service: smarter_flair_vents.refresh_devices
 - Efficiency data persisted to storage for reuse across restarts.
 
 ### Observability
-- Multiple debug levels in Hubitat (0–3).
+- Multiple debug levels in Hubitat (0-3).
 - Structured logs for API errors, retries, and DAB decisions.
 
 ## Porting parity notes
 - The list above is the baseline feature inventory from Hubitat.
 - Some items are intentionally optional or deferred in the HA port
   (e.g., efficiency export/import).
-- Use this list as the checklist for “feature-complete” parity.
+- Use this list as the checklist for "feature-complete" parity.
