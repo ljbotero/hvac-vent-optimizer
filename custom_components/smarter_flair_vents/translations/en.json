@@ -1,0 +1,73 @@
+{
+  "config": {
+    "flow_title": "Smarter Flair Vents",
+    "step": {
+      "user": {
+        "title": "Connect to Flair",
+        "description": "Enter the OAuth 2.0 Client ID and Client Secret from your Flair developer app. The app must use the client_credentials grant type. If you see scope errors, your app may be missing permissions.",
+        "data": {
+          "client_id": "Client ID (OAuth 2.0)",
+          "client_secret": "Client Secret (OAuth 2.0)"
+        }
+      },
+      "structure": {
+        "title": "Select structure",
+        "description": "Choose which Flair structure (home) to manage.",
+        "data": {
+          "structure_id": "Structure"
+        }
+      }
+    },
+    "error": {
+      "auth": "Authentication failed. Check the Client ID/Secret and OAuth app type.",
+      "invalid_client": "OAuth credentials are invalid or not authorized for client_credentials.",
+      "invalid_grant": "OAuth grant is invalid. Verify the client credentials and grant type.",
+      "invalid_scope": "Your OAuth app does not allow one or more required scopes. Ask Flair to enable missing scopes.",
+      "rate_limited": "Flair rate limit reached. Wait a moment and try again.",
+      "timeout": "Flair did not respond in time. Check connectivity and try again.",
+      "server_error": "Flair returned a server error. Try again later.",
+      "cannot_connect": "Could not connect to Flair. Check network access and try again.",
+      "no_structures": "No structures were found for this account.",
+      "unknown": "Unexpected error. Check logs for details."
+    }
+  },
+  "options": {
+    "step": {
+      "menu": {
+        "title": "Smarter Flair Vents options",
+        "description": "Choose which settings to configure. Start with DAB & polling, then map thermostats and sensors.\n\nSupport the project: https://github.com/sponsors/ljbotero"
+      },
+      "algorithm_settings": {
+        "title": "Algorithm & polling",
+        "description": "Tune Dynamic Airflow Balancing (DAB) and polling behavior.\n\n- Use DAB: automatically adjusts vents based on room efficiency.\n- Force manual: sets the Flair structure to manual when DAB runs.\n- Close inactive rooms: closes vents for rooms marked inactive (airflow safety may reopen some vents).\n- Granularity: rounds vent changes to reduce frequent adjustments.\n- Polling intervals: refresh rates for active vs idle HVAC.\n- Initial efficiency: starting % used before learned data exists.\n- Notifications/logbook: optionally record efficiency adjustments.\n- Control strategy:\n  - dab: uses the original airflow curve\n  - cost: uses a linear target with movement/open penalties\n  - stats: uses a learned linear model per vent\n  - hybrid: picks the lowest-cost target from all strategies",
+        "data": {
+          "dab_enabled": "Use Dynamic Airflow Balancing (automatic vent control)",
+          "dab_force_manual": "Force Flair structure mode to manual while DAB is enabled",
+          "close_inactive_rooms": "Close vents in rooms marked inactive",
+          "vent_granularity": "Vent adjustment granularity (smaller = finer control)",
+          "poll_interval_active": "Polling interval while HVAC is active (minutes)",
+          "poll_interval_idle": "Polling interval while HVAC is idle (minutes)",
+          "initial_efficiency_percent": "Initial efficiency percent for new rooms",
+          "notify_efficiency_changes": "Notify when efficiency values are adjusted",
+          "log_efficiency_changes": "Write efficiency adjustments to the logbook",
+          "control_strategy": "Control strategy (dab, cost, stats, hybrid)",
+          "min_adjustment_percent": "Minimum vent change before adjusting (%)",
+          "min_adjustment_interval": "Minimum minutes between vent adjustments",
+          "temp_error_override_c": "Temperature error (C) that overrides hold rules"
+        }
+      },
+      "vent_assignments": {
+        "title": "Vent assignments",
+        "description": "Assign a thermostat and (optionally) a temperature sensor for each vent. Found {vent_count} vents.\n\n- Thermostat: the HVAC system serving that vent.\n- Temperature sensor (optional): overrides Flair room temperature for DAB.\n- If no sensor is selected, the Flair room temperature (including any Flair‑assigned puck/remote sensor) is used."
+      },
+      "conventional_vents": {
+        "title": "Conventional vent counts",
+        "description": "Enter how many non-Flair vents exist for each thermostat. This prevents total airflow from dropping too low when DAB closes vents. If unsure, set to 0."
+      }
+    },
+    "error": {
+      "cannot_connect": "Unable to load vents from Flair. Check your connection and credentials.",
+      "no_assignments": "Please assign thermostats to vents before setting conventional vent counts."
+    }
+  }
+}

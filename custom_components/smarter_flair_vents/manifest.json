@@ -1,0 +1,13 @@
+{
+  "domain": "smarter_flair_vents",
+  "name": "Smarter Flair Vents",
+  "documentation": "https://github.com/ljbotero/smarter-flair-vents",
+  "issue_tracker": "https://github.com/ljbotero/smarter-flair-vents/issues",
+  "requirements": [],
+  "codeowners": [
+    "@ljbotero"
+  ],
+  "version": "0.1.0",
+  "config_flow": true,
+  "iot_class": "cloud_polling"
+}

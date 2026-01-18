@@ -10,6 +10,10 @@ UI config flow and options flow.
 3) Category: Integration
 4) Install and restart Home Assistant
 
+### Manual install
+Copy the `custom_components/smarter_flair_vents` folder into your Home Assistant
+`config/custom_components` directory, then restart Home Assistant.
+
 ## Support
 
 If you'd like to support development, you can sponsor via GitHub Sponsors:

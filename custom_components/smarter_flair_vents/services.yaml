@@ -1,0 +1,119 @@
+set_room_active:
+  name: Set room active
+  description: Mark a room active or inactive (home/away) by room_id or vent_id.
+  fields:
+    entry_id:
+      name: Entry ID
+      description: Specific integration entry (required if multiple entries exist).
+      example: "abcd1234"
+    room_id:
+      name: Room ID
+      description: Flair room id to update.
+      example: "122133"
+    vent_id:
+      name: Vent ID
+      description: Flair vent id (room_id is resolved from this).
+      example: "472379e6-8282-5911-390c-835c6d6e0f9e"
+    active:
+      name: Active
+      description: True to mark room active, false to mark inactive.
+      example: true
+
+set_room_setpoint:
+  name: Set room setpoint
+  description: Set a room setpoint in Celsius by room_id or vent_id.
+  fields:
+    entry_id:
+      name: Entry ID
+      description: Specific integration entry (required if multiple entries exist).
+      example: "abcd1234"
+    room_id:
+      name: Room ID
+      description: Flair room id to update.
+      example: "122133"
+    vent_id:
+      name: Vent ID
+      description: Flair vent id (room_id is resolved from this).
+      example: "472379e6-8282-5911-390c-835c6d6e0f9e"
+    set_point_c:
+      name: Setpoint (C)
+      description: Target setpoint in Celsius.
+      example: 22.0
+    hold_until:
+      name: Hold Until
+      description: Optional ISO timestamp to hold until.
+      example: "2026-01-03T15:30:00Z"
+
+set_structure_mode:
+  name: Set structure mode
+  description: Force structure mode to auto or manual.
+  fields:
+    entry_id:
+      name: Entry ID
+      description: Specific integration entry (required if multiple entries exist).
+      example: "abcd1234"
+    structure_mode:
+      name: Structure mode
+      description: Mode to set for the structure.
+      example: manual
+
+run_dab:
+  name: Run Dynamic Airflow Balancing
+  description: Manually trigger the DAB algorithm.
+  fields:
+    entry_id:
+      name: Entry ID
+      description: Specific integration entry (required if multiple entries exist).
+      example: "abcd1234"
+    thermostat_entity:
+      name: Thermostat entity
+      description: Optional thermostat entity to limit the DAB run.
+      example: climate.upstairs
+
+refresh_devices:
+  name: Refresh devices
+  description: Force a data refresh from Flair.
+  fields:
+    entry_id:
+      name: Entry ID
+      description: Specific integration entry (required if multiple entries exist).
+      example: "abcd1234"
+
+export_efficiency:
+  name: Export efficiency data
+  description: Export learned DAB efficiency data to a JSON file, or return payload when no path is provided.
+  fields:
+    entry_id:
+      name: Entry ID
+      description: Specific integration entry (required if multiple entries exist).
+      example: "abcd1234"
+    efficiency_path:
+      name: Export file path
+      description: Optional path under your HA config directory. If omitted, the payload is returned in the service response.
+      example: "smarter_flair_vents_efficiency_export.json"
+
+import_efficiency:
+  name: Import efficiency data
+  description: Import learned DAB efficiency data from a JSON file.
+  fields:
+    entry_id:
+      name: Entry ID
+      description: Specific integration entry (required if multiple entries exist).
+      example: "abcd1234"
+    efficiency_path:
+      name: Import file path
+      description: Optional path under your HA config directory (use this OR efficiency_payload).
+      example: "custom_components/smarter_flair_vents/eficiency_export.json"
+    efficiency_payload:
+      name: Import payload
+      description: Optional inline JSON payload (use this OR efficiency_path).
+      example: >-
+        {"exportMetadata":{"version":"0.22","exportDate":"2025-06-26T15:30:49Z","structureId":"58538"},"efficiencyData":{"globalRates":{"maxCoolingRate":0.756503187,"maxHeatingRate":0},"roomEfficiencies":[]}}
+    exportMetadata:
+      name: Export metadata (optional)
+      description: Optional metadata section from Hubitat export.
+      example: '{"version":"0.22","exportDate":"2025-06-26T15:30:49Z","structureId":"58538"}'
+    efficiencyData:
+      name: Efficiency data (required when using inline top-level)
+      description: Efficiency data block from Hubitat export.
+      example: '{"globalRates":{"maxCoolingRate":0.756503187,"maxHeatingRate":0},"roomEfficiencies":[]}'
