@@ -11,6 +11,8 @@ from .const import DOMAIN
 
 async def async_setup_entry(hass, entry, async_add_entities):
     coordinator = hass.data[DOMAIN][entry.entry_id]
+    if coordinator.is_manual_brand():
+        return
     vents = coordinator.data.get("vents", {}) if coordinator.data else {}
     entities = [
         FlairVentCover(coordinator, entry.entry_id, vent_id)

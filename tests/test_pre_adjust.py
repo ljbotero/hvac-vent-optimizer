@@ -1,4 +1,4 @@
-from dab import DEFAULT_SETTINGS, should_pre_adjust
+from custom_components.hvac_vent_optimizer.dab import DEFAULT_SETTINGS, should_pre_adjust
 
 
 def test_should_pre_adjust_cooling_threshold():

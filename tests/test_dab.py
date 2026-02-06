@@ -1,6 +1,6 @@
 import pytest
 
-from dab import (
+from custom_components.hvac_vent_optimizer.dab import (
     DEFAULT_SETTINGS,
     adjust_for_minimum_airflow,
     calculate_hvac_mode,

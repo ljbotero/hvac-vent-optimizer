@@ -1,4 +1,4 @@
-from api import FlairApi
+from custom_components.hvac_vent_optimizer.api import FlairApi
 
 
 def test_extract_devices_parses_minimal_payload():

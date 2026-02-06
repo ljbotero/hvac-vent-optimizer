@@ -1,11 +1,13 @@
-"""Coordinator for Smarter Flair Vents."""
+"""Coordinator for HVAC Vent Optimizer."""
 from __future__ import annotations
 
 import logging
+import math
 from datetime import datetime, timedelta, timezone
 import asyncio
 from typing import Any
 
+import aiohttp
 from homeassistant.components.climate.const import HVACAction
 from homeassistant.components import persistent_notification, logbook
 from homeassistant.config_entries import ConfigEntry
@@ -15,8 +17,12 @@ from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .api import FlairApi
+from .api import FlairApi, FlairApiError
 from .const import (
+    BRAND_FLAIR,
+    BRAND_MANUAL,
+    CONF_MANUAL_VENTS,
+    CONF_VENT_BRAND,
     CONF_CLOSE_INACTIVE_ROOMS,
     CONF_CONVENTIONAL_VENTS_BY_THERMOSTAT,
     CONF_DAB_ENABLED,
@@ -65,11 +71,29 @@ from .utils import get_remote_sensor_id, is_fahrenheit_unit
 
 _LOGGER = logging.getLogger(__name__)
 
+EFF_ACTION_STABLE_MIN = 1.0
+EFF_WARMUP_MIN = 2.0
+EFF_MIN_WINDOW_MIN = 5.0
+EFF_MAX_WINDOW_MIN = 30.0
+EFF_MIN_DELTA_C = 0.2
+EFF_MIN_APERTURE_PCT = 5.0
+EFF_MIN_DUCT_DELTA_C = 2.0
+EFF_DUCT_STABILITY_C = 1.0
+EFF_APERTURE_JITTER_PCT = 15.0
+EFF_ALPHA0 = 0.10
+EFF_ALPHA_MIN = 0.01
+EFF_BETA = 0.20
+EFF_SHRINKAGE = 0.01
+EFF_REGIME_CONFIDENCE = 0.60
+EFF_SIGMA_MIN = 0.05
+EFF_SIGMA_REL = 0.25
+EFF_REGIME_COUNT = 2
+
 
 class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
-    """Coordinates API access and polling for Flair devices."""
+    """Coordinates API access and polling for vent devices."""
 
-    def __init__(self, hass: HomeAssistant, api: FlairApi, entry: ConfigEntry) -> None:
+    def __init__(self, hass: HomeAssistant, api: FlairApi | None, entry: ConfigEntry) -> None:
         self.api = api
         self.entry = entry
         self._unsub_thermostat_listeners: list[callable] = []
@@ -79,7 +103,10 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._vent_last_reading: dict[str, datetime] = {}
         self._vent_last_commanded: dict[str, datetime] = {}
         self._vent_last_target: dict[str, int] = {}
+        self._manual_apertures: dict[str, int] = {}
         self._vent_models: dict[str, dict[str, dict[str, float]]] = {}
+        self._efficiency_models: dict[str, dict[str, dict[str, Any]]] = {}
+        self._vent_adjustments: dict[str, list[dict[str, Any]]] = {}
         self._strategy_metrics: dict[str, dict[str, Any]] = {}
         self._cycle_stats: dict[str, dict[str, Any]] = {}
         self._last_strategy: str | None = None
@@ -133,10 +160,50 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._max_rates = stored.get("max_rates", self._max_rates)
         self._max_running_minutes = stored.get("max_running_minutes", {})
         self._vent_models = stored.get("vent_models", {})
+        self._efficiency_models = stored.get("efficiency_models", {})
+        self._vent_adjustments = stored.get("vent_adjustments", {})
         self._strategy_metrics = stored.get("strategy_metrics", {})
+
+    def _get_brand(self) -> str:
+        return self.entry.options.get(CONF_VENT_BRAND, self.entry.data.get(CONF_VENT_BRAND, BRAND_FLAIR))
+
+    def _is_manual(self) -> bool:
+        return self._get_brand() == BRAND_MANUAL
+
+    def is_manual_brand(self) -> bool:
+        return self._is_manual()
+
+    def _get_vent_assignments(self) -> dict[str, dict[str, Any]]:
+        if self._is_manual():
+            assignments: dict[str, dict[str, Any]] = {}
+            for vent in self._get_manual_vents():
+                vent_id = vent.get("id")
+                if not vent_id:
+                    continue
+                assignment: dict[str, Any] = {}
+                thermostat = vent.get(CONF_THERMOSTAT_ENTITY)
+                temp_sensor = vent.get(CONF_TEMP_SENSOR_ENTITY)
+                if thermostat:
+                    assignment[CONF_THERMOSTAT_ENTITY] = thermostat
+                if temp_sensor:
+                    assignment[CONF_TEMP_SENSOR_ENTITY] = temp_sensor
+                assignments[vent_id] = assignment
+            return assignments
+        return self.entry.options.get(CONF_VENT_ASSIGNMENTS, self.entry.data.get(CONF_VENT_ASSIGNMENTS, {}))
+
+    def _get_manual_vents(self) -> list[dict[str, Any]]:
+        return self.entry.options.get(CONF_MANUAL_VENTS, self.entry.data.get(CONF_MANUAL_VENTS, []))
+
+    def get_manual_vents(self) -> list[dict[str, Any]]:
+        return self._get_manual_vents()
+
+    def set_manual_aperture(self, vent_id: str, value: int) -> None:
+        self._manual_apertures[vent_id] = max(0, min(100, int(value)))
 
     async def async_ensure_structure_mode(self) -> None:
         """Ensure structure mode is manual when DAB is enabled (optional)."""
+        if self._is_manual():
+            return
         if not self.entry.options.get(CONF_DAB_ENABLED, False):
             return
         if not self.entry.options.get(CONF_DAB_FORCE_MANUAL, DEFAULT_DAB_FORCE_MANUAL):
@@ -145,16 +212,22 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not structure_id:
             return
         try:
-            await self.api.async_set_structure_mode(structure_id, "manual")
+            if self.api:
+                await self.api.async_set_structure_mode(structure_id, "manual")
         except Exception as err:  # noqa: BLE001
             _LOGGER.warning("Failed to set structure mode to manual: %s", err)
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from Flair API."""
+        if self._is_manual():
+            return await self._async_update_manual_data()
+
         structure_id = self.entry.data[CONF_STRUCTURE_ID]
         if self.entry.options.get(CONF_DAB_ENABLED, False):
             await self.async_ensure_structure_mode()
         try:
+            if not self.api:
+                raise UpdateFailed("Flair API client not initialized")
             vents = await self.api.async_get_vents(structure_id)
             pucks = await self.api.async_get_pucks(structure_id)
         except Exception as err:  # noqa: BLE001 - surface errors to HA
@@ -169,6 +242,65 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "vents": {vent["id"]: vent for vent in vents},
             "pucks": {puck["id"]: puck for puck in pucks},
         }
+
+        if self.entry.options.get(CONF_DAB_ENABLED, False):
+            try:
+                await self._async_process_dab(data)
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.exception("DAB processing failed: %s", err)
+                self._async_notify_error("DAB processing failed", str(err))
+
+        return data
+
+    async def _async_update_manual_data(self) -> dict[str, Any]:
+        manual_vents = self._get_manual_vents()
+        vents: list[dict[str, Any]] = []
+        now = datetime.now(timezone.utc)
+
+        for vent in manual_vents:
+            vent_id = vent.get("id")
+            name = vent.get("name") or f"Vent {vent_id}"
+            temp_sensor = vent.get(CONF_TEMP_SENSOR_ENTITY)
+            temp = None
+            if temp_sensor:
+                state = self.hass.states.get(temp_sensor)
+                if state and state.state not in {STATE_UNKNOWN, STATE_UNAVAILABLE}:
+                    try:
+                        temp = float(state.state)
+                    except ValueError:
+                        temp = None
+                    if temp is not None:
+                        unit = state.attributes.get("unit_of_measurement")
+                        if is_fahrenheit_unit(unit):
+                            temp = (temp - 32) * 5 / 9
+
+            if vent_id is None:
+                continue
+
+            aperture = self._manual_apertures.get(vent_id)
+            if aperture is None:
+                aperture = 50
+            self._manual_apertures[vent_id] = int(aperture)
+            self._vent_last_reading[vent_id] = now
+
+            room = {
+                "id": vent_id,
+                "attributes": {
+                    "name": name,
+                    "current-temperature-c": temp,
+                    "active": True,
+                },
+            }
+            vents.append(
+                {
+                    "id": vent_id,
+                    "name": name,
+                    "attributes": {"percent-open": aperture},
+                    "room": room,
+                }
+            )
+
+        data = {"vents": {vent["id"]: vent for vent in vents}, "pucks": {}}
 
         if self.entry.options.get(CONF_DAB_ENABLED, False):
             try:
@@ -296,7 +428,7 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
 
     def _get_thermostat_entities(self) -> list[str]:
-        assignments = self.entry.options.get(CONF_VENT_ASSIGNMENTS, {})
+        assignments = self._get_vent_assignments()
         entities = {
             data.get(CONF_THERMOSTAT_ENTITY)
             for data in assignments.values()
@@ -434,7 +566,13 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return slope, intercept
 
     def _update_strategy_metrics(
-        self, strategy: str, temp_error: float, adjustments: int, movement: float
+        self,
+        strategy: str,
+        temp_error: float,
+        adjustments: int,
+        movement: float,
+        active_temp_error: float | None = None,
+        active_rooms: int = 0,
     ) -> None:
         metrics = self._strategy_metrics.setdefault(
             strategy,
@@ -447,6 +585,10 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "last_adjustments": 0,
                 "last_movement": 0.0,
                 "last_updated": None,
+                "active_cycles": 0,
+                "avg_active_temp_error": 0.0,
+                "last_active_temp_error": None,
+                "last_active_rooms": 0,
             },
         )
         cycles = metrics["cycles"] + 1
@@ -464,11 +606,30 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         metrics["last_adjustments"] = adjustments
         metrics["last_movement"] = movement
         metrics["last_updated"] = datetime.now(timezone.utc).isoformat()
+        if active_temp_error is not None:
+            active_cycles = metrics.get("active_cycles", 0) + 1
+            metrics["active_cycles"] = active_cycles
+            metrics["avg_active_temp_error"] = (
+                (metrics.get("avg_active_temp_error", 0.0) * (active_cycles - 1) + active_temp_error)
+                / active_cycles
+            )
+            metrics["last_active_temp_error"] = active_temp_error
+            metrics["last_active_rooms"] = active_rooms
 
     def get_strategy_metrics(self) -> dict[str, Any]:
         return {
             "last_strategy": self._last_strategy,
             "strategies": self._strategy_metrics,
+            "vent_brand": self._get_brand(),
+            "dab_enabled": self.entry.options.get(CONF_DAB_ENABLED, False),
+            "close_inactive_rooms": self.entry.options.get(CONF_CLOSE_INACTIVE_ROOMS, True),
+            "min_adjustment_percent": self.entry.options.get(
+                CONF_MIN_ADJUSTMENT_PERCENT, DEFAULT_MIN_ADJUSTMENT_PERCENT
+            ),
+            "min_adjustment_interval": self.entry.options.get(
+                CONF_MIN_ADJUSTMENT_INTERVAL, DEFAULT_MIN_ADJUSTMENT_INTERVAL
+            ),
+            "min_combined_airflow_percent": DEFAULT_SETTINGS.min_combined_vent_flow,
         }
 
     @callback
@@ -576,7 +737,7 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not self.data:
             return
 
-        assignments = self.entry.options.get(CONF_VENT_ASSIGNMENTS, {})
+        assignments = self._get_vent_assignments()
         vent_ids = [
             vent_id
             for vent_id, assignment in assignments.items()
@@ -589,7 +750,7 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self._async_apply_dab_adjustments(thermostat_entity, hvac_action, vent_ids, self.data)
 
     async def _async_process_dab(self, data: dict[str, Any]) -> None:
-        assignments = self.entry.options.get(CONF_VENT_ASSIGNMENTS, {})
+        assignments = self._get_vent_assignments()
         if not assignments:
             return
 
@@ -612,7 +773,7 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not self.data:
             await self.async_request_refresh()
 
-        assignments = self.entry.options.get(CONF_VENT_ASSIGNMENTS, {})
+        assignments = self._get_vent_assignments()
         if not assignments:
             return
 
@@ -684,7 +845,8 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._dab_state[thermostat_entity] = {
             "mode": hvac_action,
             "started_cycle": now,
-            "started_running": now,
+            "started_running": now + timedelta(minutes=EFF_ACTION_STABLE_MIN),
+            "samples": {},
         }
         self._cycle_stats[thermostat_entity] = {
             "adjustments": 0,
@@ -692,6 +854,7 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "strategy": self.entry.options.get(
                 CONF_CONTROL_STRATEGY, DEFAULT_CONTROL_STRATEGY
             ),
+            "vent_movement": {},
         }
 
         for vent_id in vent_ids:
@@ -731,8 +894,12 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
 
         finished_running = datetime.now(timezone.utc)
-        total_running_minutes = (finished_running - started_running).total_seconds() / 60.0
-        total_cycle_minutes = (finished_running - started_cycle).total_seconds() / 60.0
+        total_running_minutes = max(
+            0.0, (finished_running - started_running).total_seconds() / 60.0
+        )
+        total_cycle_minutes = max(
+            0.0, (finished_running - started_cycle).total_seconds() / 60.0
+        )
 
         prev_max = self._max_running_minutes.get(
             thermostat_entity, DEFAULT_SETTINGS.max_minutes_to_setpoint
@@ -742,7 +909,9 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
 
         rate_prop = "cooling" if hvac_action == HVACAction.COOLING else "heating"
+        setpoint_target = self._get_thermostat_target_raw(thermostat_entity, hvac_action)
         room_rates: dict[str, float] = {}
+        samples_by_vent: dict[str, list[dict[str, Any]]] = state.get("samples", {})
 
         for vent_id in vent_ids:
             room_name = self._get_room_name(vent_id, self.data)
@@ -750,72 +919,52 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._set_vent_rate(vent_id, rate_prop, room_rates[room_name])
                 continue
 
-            start_temp = self._vent_starting_temps.get(vent_id)
-            current_temp = self._get_room_temp(vent_id, self.data)
-            if start_temp is None or current_temp is None:
+            samples = samples_by_vent.get(vent_id, [])
+            efficiency_sample, observed_rate, mean_aperture = self._compute_efficiency_sample(
+                hvac_action, started_running, samples, setpoint_target
+            )
+            if efficiency_sample is None:
                 continue
 
-            percent_open = self._vent_starting_open.get(
-                vent_id, int(self._get_vent_attribute(vent_id, self.data, "percent-open") or 0)
-            )
             current_rate = self._vent_rates.get(vent_id, {}).get(rate_prop, 0.0)
-
-            new_rate = calculate_room_change_rate(
-                start_temp,
-                current_temp,
-                total_cycle_minutes,
-                percent_open,
-                current_rate,
-                DEFAULT_SETTINGS,
+            baseline_rate, effective_rate, confidence = self._update_efficiency_model(
+                vent_id, rate_prop, efficiency_sample
             )
-
-            if new_rate <= 0:
-                setpoint = self._get_thermostat_setpoint(thermostat_entity, hvac_action)
-                if setpoint is not None and has_room_reached_setpoint(
-                    hvac_action, setpoint, current_temp
-                ):
-                    if current_rate > 0:
-                        new_rate = current_rate
-                elif percent_open > 0:
-                    new_rate = DEFAULT_SETTINGS.min_temp_change_rate
-                elif current_rate == 0:
-                    max_rate = self._max_rates.get(rate_prop, DEFAULT_SETTINGS.max_temp_change_rate)
-                    new_rate = max_rate * 0.1
-                else:
-                    continue
-
-            averaged = rolling_average(current_rate, new_rate, percent_open / 100, 4)
-            cleaned = round_big_decimal(averaged, 6)
+            cleaned = round_big_decimal(baseline_rate, 6)
             self._set_vent_rate(vent_id, rate_prop, cleaned)
             self._maybe_log_efficiency_change(vent_id, rate_prop, current_rate, cleaned)
 
             if room_name:
                 room_rates[room_name] = cleaned
 
-            if cleaned > self._max_rates.get(rate_prop, 0):
-                self._max_rates[rate_prop] = cleaned
+            if effective_rate > self._max_rates.get(rate_prop, 0):
+                self._max_rates[rate_prop] = effective_rate
 
-            if total_cycle_minutes > 0 and percent_open > 0:
-                observed_rate = abs(current_temp - start_temp) / total_cycle_minutes
+            if observed_rate is not None and observed_rate > 0 and mean_aperture is not None:
                 model = self._vent_models.setdefault(vent_id, {})
                 stats = model.setdefault(
                     rate_prop,
                     {"n": 0, "sum_x": 0.0, "sum_y": 0.0, "sum_xx": 0.0, "sum_xy": 0.0},
                 )
                 stats["n"] += 1
-                stats["sum_x"] += percent_open
+                stats["sum_x"] += mean_aperture
                 stats["sum_y"] += observed_rate
-                stats["sum_xx"] += percent_open * percent_open
-                stats["sum_xy"] += percent_open * observed_rate
+                stats["sum_xx"] += mean_aperture * mean_aperture
+                stats["sum_xy"] += mean_aperture * observed_rate
 
-        setpoint = self._get_thermostat_setpoint(thermostat_entity, hvac_action)
+        setpoint = setpoint_target or self._get_thermostat_setpoint(
+            thermostat_entity, hvac_action
+        )
         if setpoint is not None:
             errors: list[float] = []
+            active_errors: list[float] = []
             for vent_id in vent_ids:
                 temp = self._get_room_temp(vent_id, self.data)
                 error = self._calculate_temp_error(hvac_action, setpoint, temp)
                 if error is not None:
                     errors.append(error)
+                    if self._get_room_active(vent_id, self.data):
+                        active_errors.append(error)
             if errors:
                 strategy = cycle_stats.get(
                     "strategy",
@@ -824,7 +973,15 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 adjustments = int(cycle_stats.get("adjustments", 0) or 0)
                 movement = float(cycle_stats.get("movement", 0.0) or 0.0)
                 mean_error = sum(errors) / len(errors)
-                self._update_strategy_metrics(strategy, mean_error, adjustments, movement)
+                active_mean = sum(active_errors) / len(active_errors) if active_errors else None
+                self._update_strategy_metrics(
+                    strategy,
+                    mean_error,
+                    adjustments,
+                    movement,
+                    active_mean,
+                    len(active_errors),
+                )
 
         await self._async_save_state()
 
@@ -861,11 +1018,7 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         rate_and_temp: dict[str, dict[str, Any]] = {}
         missing_temp_vents: set[str] = set()
         for vent_id in vent_ids:
-            rate = self._vent_rates.get(vent_id, {}).get(
-                "cooling" if hvac_action == HVACAction.COOLING else "heating", 0.0
-            )
-            if rate <= 0:
-                rate = self._ensure_initial_rate(vent_id, hvac_action)
+            rate = self._get_effective_efficiency_rate(vent_id, hvac_action)
             temp = self._get_room_temp(vent_id, data)
             if temp is None:
                 missing_temp_vents.add(vent_id)
@@ -883,7 +1036,12 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
 
         longest_time = calculate_longest_minutes_to_target(
-            rate_and_temp, hvac_action, setpoint, max_running_time, close_inactive, DEFAULT_SETTINGS
+            rate_and_temp,
+            hvac_action,
+            setpoint,
+            max_running_time,
+            True,
+            DEFAULT_SETTINGS,
         )
         if longest_time < 0:
             longest_time = max_running_time
@@ -895,7 +1053,7 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             dab_targets = {vent_id: 100.0 for vent_id in rate_and_temp}
         else:
             dab_targets = calculate_open_percentage_for_all_vents(
-                rate_and_temp, hvac_action, setpoint, longest_time, close_inactive, DEFAULT_SETTINGS
+                rate_and_temp, hvac_action, setpoint, longest_time, True, DEFAULT_SETTINGS
             )
 
         for vent_id, state_val in rate_and_temp.items():
@@ -976,15 +1134,35 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         conventional = self.entry.options.get(CONF_CONVENTIONAL_VENTS_BY_THERMOSTAT, {}).get(
             thermostat_entity, 0
         )
+        pre_safety_targets = dict(targets)
         targets = adjust_for_minimum_airflow(
-            rate_and_temp, hvac_action, targets, conventional, DEFAULT_SETTINGS
+            rate_and_temp,
+            hvac_action,
+            targets,
+            conventional,
+            DEFAULT_SETTINGS,
+            active_only=True,
+            allow_inactive_if_needed=True,
         )
 
+        safety_opened = {
+            vent_id
+            for vent_id, target in targets.items()
+            if target > pre_safety_targets.get(vent_id, 0)
+        }
         now = datetime.now(timezone.utc)
         changed = 0
         movement_total = 0.0
         for vent_id, target in targets.items():
             active = rate_and_temp.get(vent_id, {}).get("active", True)
+            if not close_inactive and not active:
+                current = self._get_vent_attribute(vent_id, data, "percent-open")
+                if current is None:
+                    continue
+                if vent_id in safety_opened:
+                    target = max(float(current), target)
+                else:
+                    target = float(current)
             target_rounded = round_to_nearest_multiple(target, granularity)
             current = self._get_vent_attribute(vent_id, data, "percent-open")
             if current is None:
@@ -995,18 +1173,42 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             temp = float(rate_and_temp.get(vent_id, {}).get("temp", 0) or 0)
             error = self._calculate_temp_error(hvac_action, setpoint, temp)
             override = error is not None and error >= temp_error_override
-            safety_override = close_inactive and not active and target_rounded > 0
+            safety_override = vent_id in safety_opened
             if not override and not safety_override:
                 if min_adjust_percent > 0 and abs(target_rounded - current_int) < min_adjust_percent:
                     continue
                 last_change = self._vent_last_commanded.get(vent_id)
                 if last_change and (now - last_change) < timedelta(minutes=min_adjust_interval):
                     continue
+            movement_value = abs(target_rounded - current_int)
+            if self._is_manual():
+                self._vent_last_target[vent_id] = target_rounded
+                self._vent_last_commanded[vent_id] = now
+            else:
+                if self.api:
+                    try:
+                        await self.api.async_set_vent_position(vent_id, target_rounded)
+                    except (asyncio.TimeoutError, aiohttp.ClientError, FlairApiError) as err:
+                        _LOGGER.warning(
+                            "Failed to set vent %s to %s%%: %s",
+                            vent_id,
+                            target_rounded,
+                            err,
+                        )
+                        continue
+                self._vent_last_commanded[vent_id] = now
+                self._vent_last_target[vent_id] = target_rounded
+
             changed += 1
-            movement_total += abs(target_rounded - current_int)
-            await self.api.async_set_vent_position(vent_id, target_rounded)
-            self._vent_last_commanded[vent_id] = now
-            self._vent_last_target[vent_id] = target_rounded
+            movement_total += movement_value
+            self._record_vent_adjustment(vent_id, current_int, target_rounded, now)
+            vent_movement = self._cycle_stats.get(thermostat_entity, {}).setdefault(
+                "vent_movement", {}
+            )
+            vent_movement[vent_id] = vent_movement.get(vent_id, 0.0) + movement_value
+
+        for vent_id in vent_ids:
+            self._record_cycle_sample(thermostat_entity, vent_id, data)
 
         if thermostat_entity:
             cycle_stats = self._cycle_stats.setdefault(
@@ -1015,6 +1217,7 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "adjustments": 0,
                     "movement": 0.0,
                     "strategy": control_strategy,
+                    "vent_movement": {},
                 },
             )
             cycle_stats["adjustments"] += changed
@@ -1048,7 +1251,7 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return bool(active) if active is not None else True
 
     def _get_room_temp(self, vent_id: str, data: dict[str, Any]) -> float | None:
-        assignment = self.entry.options.get(CONF_VENT_ASSIGNMENTS, {}).get(vent_id, {})
+        assignment = self._get_vent_assignments().get(vent_id, {})
         temp_sensor = assignment.get(CONF_TEMP_SENSOR_ENTITY)
         if temp_sensor:
             sensor_state = self.hass.states.get(temp_sensor)
@@ -1066,6 +1269,236 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         room = self._get_room_data(vent_id, data)
         temp = (room.get("attributes") or {}).get("current-temperature-c")
         return float(temp) if temp is not None else None
+
+    def _get_vent_duct_temp(self, vent_id: str, data: dict[str, Any]) -> float | None:
+        vent = (data.get("vents") or {}).get(vent_id, {})
+        attrs = vent.get("attributes") or {}
+        temp = attrs.get("duct-temperature-c")
+        if temp is not None:
+            return self._coerce_temperature(temp, "C")
+        temp = attrs.get("duct-temperature-f")
+        if temp is not None:
+            return self._coerce_temperature(temp, "F")
+        return None
+
+    def _record_cycle_sample(self, thermostat_entity: str, vent_id: str, data: dict[str, Any]) -> None:
+        dab_state = getattr(self, "_dab_state", {})
+        state = dab_state.get(thermostat_entity)
+        if not state:
+            return
+        samples_by_vent = state.setdefault("samples", {})
+        samples = samples_by_vent.setdefault(vent_id, [])
+        temp = self._get_room_temp(vent_id, data)
+        aperture = self._get_vent_attribute(vent_id, data, "percent-open")
+        if temp is None or aperture is None:
+            return
+        duct_temp = self._get_vent_duct_temp(vent_id, data)
+        samples.append(
+            {
+                "t": datetime.now(timezone.utc),
+                "temp": float(temp),
+                "aperture": float(aperture),
+                "duct": duct_temp,
+            }
+        )
+        if len(samples) > 240:
+            del samples[: len(samples) - 240]
+
+    def _filter_samples_window(
+        self, started_running: datetime, samples: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        if not samples:
+            return []
+        window_start = started_running + timedelta(minutes=EFF_WARMUP_MIN)
+        window_end = started_running + timedelta(minutes=EFF_MAX_WINDOW_MIN)
+        windowed = [
+            sample
+            for sample in samples
+            if sample["t"] >= window_start and sample["t"] <= window_end
+        ]
+        return windowed
+
+    def _truncate_samples_to_setpoint(
+        self,
+        hvac_action: str,
+        samples: list[dict[str, Any]],
+        setpoint_target: float | None,
+    ) -> list[dict[str, Any]]:
+        if not samples or setpoint_target is None:
+            return samples
+        if hvac_action == HVACAction.HEATING:
+            for idx, sample in enumerate(samples):
+                if float(sample["temp"]) >= setpoint_target:
+                    return samples[: idx + 1]
+        elif hvac_action == HVACAction.COOLING:
+            for idx, sample in enumerate(samples):
+                if float(sample["temp"]) <= setpoint_target:
+                    return samples[: idx + 1]
+        return samples
+
+    def _robust_slope(self, samples: list[dict[str, Any]]) -> float | None:
+        if len(samples) < 2:
+            return None
+        temps = [float(sample["temp"]) for sample in samples]
+        temps_sorted = sorted(temps)
+        mid = len(temps_sorted) // 2
+        median = temps_sorted[mid] if len(temps_sorted) % 2 else (temps_sorted[mid - 1] + temps_sorted[mid]) / 2
+        deviations = [abs(temp - median) for temp in temps]
+        deviations_sorted = sorted(deviations)
+        mad_mid = len(deviations_sorted) // 2
+        mad = deviations_sorted[mad_mid] if len(deviations_sorted) % 2 else (
+            deviations_sorted[mad_mid - 1] + deviations_sorted[mad_mid]
+        ) / 2
+        filtered = samples
+        if mad > 0:
+            threshold = 3 * mad
+            filtered = [s for s in samples if abs(float(s["temp"]) - median) <= threshold]
+        if len(filtered) < 2:
+            return None
+        t0 = filtered[0]["t"]
+        xs = [(s["t"] - t0).total_seconds() / 60.0 for s in filtered]
+        ys = [float(s["temp"]) for s in filtered]
+        n = len(xs)
+        sum_x = sum(xs)
+        sum_y = sum(ys)
+        sum_xx = sum(x * x for x in xs)
+        sum_xy = sum(x * y for x, y in zip(xs, ys))
+        denom = (n * sum_xx) - (sum_x * sum_x)
+        if denom == 0:
+            return None
+        return ((n * sum_xy) - (sum_x * sum_y)) / denom
+
+    def _mean_aperture_from_samples(self, samples: list[dict[str, Any]]) -> float | None:
+        if not samples:
+            return None
+        apertures = [float(sample["aperture"]) for sample in samples]
+        return sum(apertures) / len(apertures) if apertures else None
+
+    def _compute_efficiency_sample(
+        self,
+        hvac_action: str,
+        started_running: datetime,
+        samples: list[dict[str, Any]],
+        setpoint_target: float | None = None,
+    ) -> tuple[float | None, float | None, float | None]:
+        windowed = self._filter_samples_window(started_running, samples)
+        windowed = self._truncate_samples_to_setpoint(hvac_action, windowed, setpoint_target)
+        if len(windowed) < 2:
+            return None, None, None
+        duration = (windowed[-1]["t"] - windowed[0]["t"]).total_seconds() / 60.0
+        if duration < EFF_MIN_WINDOW_MIN:
+            return None, None, None
+        delta_temp = abs(float(windowed[-1]["temp"]) - float(windowed[0]["temp"]))
+        if delta_temp < EFF_MIN_DELTA_C:
+            return None, None, None
+        apertures = [float(sample["aperture"]) for sample in windowed]
+        if not apertures:
+            return None, None, None
+        mean_aperture = sum(apertures) / len(apertures)
+        if mean_aperture < EFF_MIN_APERTURE_PCT:
+            return None, None, None
+        if max(apertures) - min(apertures) > EFF_APERTURE_JITTER_PCT:
+            return None, None, None
+
+        rate_room = self._robust_slope(windowed)
+        if rate_room is None:
+            return None, None, None
+
+        duct_values = [sample.get("duct") for sample in windowed if sample.get("duct") is not None]
+        rate_norm = rate_room
+        if duct_values:
+            mean_duct = sum(float(v) for v in duct_values) / len(duct_values)
+            variance = sum((float(v) - mean_duct) ** 2 for v in duct_values) / len(duct_values)
+            stability = variance ** 0.5
+            if stability <= EFF_DUCT_STABILITY_C:
+                deltas = [
+                    abs(float(sample["duct"]) - float(sample["temp"]))
+                    for sample in windowed
+                    if sample.get("duct") is not None
+                ]
+                mean_room_delta = sum(deltas) / len(deltas) if deltas else 0.0
+                if mean_room_delta >= EFF_MIN_DUCT_DELTA_C:
+                    rate_norm = rate_room / mean_room_delta
+
+        rate_eff = rate_norm / (mean_aperture / 100.0)
+        if hvac_action == HVACAction.HEATING:
+            efficiency = max(0.0, rate_eff)
+        else:
+            efficiency = max(0.0, -rate_eff)
+        if efficiency <= 0:
+            return None, None, None
+        observed_rate = abs(rate_room)
+        return efficiency, observed_rate, mean_aperture
+
+    def _update_efficiency_model(
+        self, vent_id: str, mode: str, sample: float
+    ) -> tuple[float, float, float]:
+        vent_model = self._efficiency_models.setdefault(vent_id, {})
+        model = vent_model.setdefault(
+            mode,
+            {
+                "baseline": None,
+                "offsets": [0.0 for _ in range(EFF_REGIME_COUNT)],
+                "n": 0,
+                "last_sample": None,
+                "confidence": 0.0,
+                "effective": None,
+            },
+        )
+        baseline = model.get("baseline")
+        if baseline is None:
+            baseline = sample
+        n = int(model.get("n", 0)) + 1
+        alpha = max(EFF_ALPHA_MIN, EFF_ALPHA0 / (n ** 0.5))
+        baseline = baseline + alpha * (sample - baseline)
+
+        offsets = list(model.get("offsets") or [0.0 for _ in range(EFF_REGIME_COUNT)])
+        sigma = max(EFF_SIGMA_MIN, EFF_SIGMA_REL * max(baseline, 0.001))
+        weights: list[float] = []
+        for offset in offsets:
+            predict = baseline + offset
+            error = abs(sample - predict)
+            weights.append(math.exp(-error / sigma))
+        total = sum(weights) or 1.0
+        weights = [w / total for w in weights]
+
+        for idx, offset in enumerate(offsets):
+            predict = baseline + offset
+            offsets[idx] = offset + (EFF_BETA * weights[idx] * (sample - predict))
+            offsets[idx] *= (1.0 - EFF_SHRINKAGE)
+
+        best_idx = max(range(len(weights)), key=lambda i: weights[i])
+        confidence = weights[best_idx] if weights else 0.0
+        effective = baseline + offsets[best_idx] if confidence >= EFF_REGIME_CONFIDENCE else baseline
+
+        model.update(
+            {
+                "baseline": baseline,
+                "offsets": offsets,
+                "n": n,
+                "last_sample": sample,
+                "confidence": confidence,
+                "effective": effective,
+            }
+        )
+        vent_model[mode] = model
+        return float(baseline), float(effective), float(confidence)
+
+    def _get_effective_efficiency_rate(self, vent_id: str, hvac_action: str) -> float:
+        mode = "cooling" if hvac_action == HVACAction.COOLING else "heating"
+        efficiency_models = getattr(self, "_efficiency_models", {})
+        model = (efficiency_models.get(vent_id) or {}).get(mode)
+        if model:
+            effective = model.get("effective")
+            if isinstance(effective, (int, float)) and effective > 0:
+                return float(effective)
+            baseline = model.get("baseline")
+            if isinstance(baseline, (int, float)) and baseline > 0:
+                return float(baseline)
+        rate = self._vent_rates.get(vent_id, {}).get(mode, 0.0)
+        if rate <= 0:
+            rate = self._ensure_initial_rate(vent_id, hvac_action)
+        return rate
 
     def _get_thermostat_setpoint(self, thermostat_entity: str, hvac_action: str) -> float | None:
         state = self.hass.states.get(thermostat_entity)
@@ -1096,11 +1529,36 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         return setpoint + offset
 
+    def _get_thermostat_target_raw(self, thermostat_entity: str, hvac_action: str) -> float | None:
+        state = self.hass.states.get(thermostat_entity)
+        if not state:
+            return None
+        attrs = state.attributes
+        if hvac_action == HVACAction.COOLING:
+            target = attrs.get("target_temp_high") or attrs.get("cooling_setpoint") or attrs.get("temperature")
+        else:
+            target = attrs.get("target_temp_low") or attrs.get("heating_setpoint") or attrs.get("temperature")
+        if target is None:
+            return None
+        unit = self._resolve_temperature_unit(attrs.get("temperature_unit"))
+        try:
+            target = float(target)
+        except (TypeError, ValueError):
+            return None
+        if is_fahrenheit_unit(unit):
+            target = (target - 32) * 5 / 9
+        return target
+
     def _set_vent_rate(self, vent_id: str, rate_type: str, value: float) -> None:
         self._vent_rates.setdefault(vent_id, {})[rate_type] = value
 
     def get_vent_efficiency_percent(self, vent_id: str, mode: str) -> float | None:
-        rate = self._vent_rates.get(vent_id, {}).get(mode, 0.0)
+        efficiency_models = getattr(self, "_efficiency_models", {})
+        model = (efficiency_models.get(vent_id) or {}).get(mode)
+        if model and isinstance(model.get("baseline"), (int, float)):
+            rate = float(model.get("baseline") or 0.0)
+        else:
+            rate = self._vent_rates.get(vent_id, {}).get(mode, 0.0)
         if rate <= 0:
             return round(self._clamp_efficiency_percent(self._initial_efficiency_percent), 1)
         percent = max(0.0, min(100.0, rate * 100))
@@ -1141,6 +1599,7 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 },
                 "roomEfficiencies": room_efficiencies,
             },
+            "efficiencyModels": getattr(self, "_efficiency_models", {}),
         }
 
     async def async_import_efficiency(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -1151,6 +1610,10 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         data = payload.get("efficiencyData") or payload
         if not isinstance(data, dict):
             raise ValueError("Missing efficiencyData section")
+
+        models = payload.get("efficiencyModels")
+        if isinstance(models, dict):
+            self._efficiency_models = models
 
         entries = data.get("roomEfficiencies") or []
         if not isinstance(entries, list):
@@ -1246,16 +1709,94 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def get_vent_last_reading(self, vent_id: str) -> datetime | None:
         return self._vent_last_reading.get(vent_id)
 
+    def get_vent_target(self, vent_id: str) -> int | None:
+        return self._vent_last_target.get(vent_id)
+
+    def _prune_adjustments(
+        self, vent_id: str, now: datetime | None = None, window_hours: float = 48.0
+    ) -> None:
+        events = self._vent_adjustments.get(vent_id)
+        if not events:
+            return
+        if now is None:
+            now = datetime.now(timezone.utc)
+        cutoff = now - timedelta(hours=window_hours)
+        pruned: list[dict[str, Any]] = []
+        for event in events:
+            ts = event.get("t")
+            if isinstance(ts, datetime):
+                ts_dt = ts
+            elif isinstance(ts, str):
+                try:
+                    ts_dt = datetime.fromisoformat(ts)
+                except ValueError:
+                    continue
+            else:
+                continue
+            if ts_dt >= cutoff:
+                pruned.append(event)
+        self._vent_adjustments[vent_id] = pruned
+
+    def _record_vent_adjustment(
+        self, vent_id: str, previous: int, target: int, when: datetime
+    ) -> None:
+        if not hasattr(self, "_vent_adjustments") or self._vent_adjustments is None:
+            self._vent_adjustments = {}
+        delta = abs(int(target) - int(previous))
+        if delta <= 0:
+            return
+        events = self._vent_adjustments.setdefault(vent_id, [])
+        events.append(
+            {
+                "t": when.isoformat(),
+                "from": int(previous),
+                "to": int(target),
+                "delta": float(delta),
+            }
+        )
+        self._prune_adjustments(vent_id, now=when)
+
+    def get_vent_adjustment_stats(
+        self, vent_id: str, window_hours: float = 24.0
+    ) -> dict[str, float]:
+        if not hasattr(self, "_vent_adjustments") or self._vent_adjustments is None:
+            self._vent_adjustments = {}
+        now = datetime.now(timezone.utc)
+        self._prune_adjustments(vent_id, now=now, window_hours=max(window_hours, 1.0))
+        events = self._vent_adjustments.get(vent_id, [])
+        if not events:
+            return {"count": 0.0, "movement": 0.0}
+        cutoff = now - timedelta(hours=window_hours)
+        count = 0
+        movement = 0.0
+        for event in events:
+            ts = event.get("t")
+            if isinstance(ts, datetime):
+                ts_dt = ts
+            elif isinstance(ts, str):
+                try:
+                    ts_dt = datetime.fromisoformat(ts)
+                except ValueError:
+                    continue
+            else:
+                continue
+            if ts_dt < cutoff:
+                continue
+            count += 1
+            movement += float(event.get("delta", 0.0) or 0.0)
+        return {"count": float(count), "movement": movement}
+
     def get_room_device_info(self, room: dict[str, Any]) -> dict[str, Any] | None:
         room_id = room.get("id")
         if not room_id:
             return None
         attrs = room.get("attributes") or {}
         name = attrs.get("name") or f"Room {room_id}"
+        manufacturer = "Manual" if self._is_manual() else "Flair"
         return {
             "identifiers": {(DOMAIN, f"room_{room_id}")},
             "name": name,
-            "manufacturer": "Flair",
+            "manufacturer": manufacturer,
             "model": "Room",
         }
 
@@ -1284,7 +1825,7 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return None
 
         # Prefer assigned temp sensor for any vent in this room.
-        assignments = self.entry.options.get(CONF_VENT_ASSIGNMENTS, {})
+        assignments = self._get_vent_assignments()
         for vent_id, vent in (self.data or {}).get("vents", {}).items():
             if (vent.get("room") or {}).get("id") != room_id:
                 continue
@@ -1307,7 +1848,7 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return float(temp) if temp is not None else None
 
     def get_room_thermostat(self, room_id: str) -> str | None:
-        assignments = self.entry.options.get(CONF_VENT_ASSIGNMENTS, {})
+        assignments = self._get_vent_assignments()
         thermostats: set[str] = set()
         for vent_id, vent in (self.data or {}).get("vents", {}).items():
             if (vent.get("room") or {}).get("id") != room_id:
@@ -1370,13 +1911,13 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             persistent_notification.async_create(
                 self.hass,
                 message,
-                title="Smarter Flair Vents",
+                title="HVAC Vent Optimizer",
             )
 
         if self._log_efficiency_changes:
             logbook.async_log_entry(
                 self.hass,
-                "Smarter Flair Vents",
+                "HVAC Vent Optimizer",
                 message,
                 domain=DOMAIN,
             )
@@ -1388,6 +1929,8 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "vent_rates": self._vent_rates,
                     "max_rates": self._max_rates,
                     "max_running_minutes": self._max_running_minutes,
+                    "efficiency_models": self._efficiency_models,
+                    "vent_adjustments": self._vent_adjustments,
                     "strategy_metrics": self._strategy_metrics,
                 }
             )

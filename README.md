@@ -1,6 +1,6 @@
-Smarter Flair Vents is a Home Assistant custom integration for Flair Smart Vents and
-Pucks, with optional Dynamic Airflow Balancing (DAB). Configuration is handled via the
-UI config flow and options flow.
+﻿HVAC Vent Optimizer is a Home Assistant custom integration for smart vents (Flair and
+Manual mode), with optional Dynamic Airflow Balancing (DAB). Configuration is handled
+via the UI config flow and options flow.
 
 ## Install (HACS)
 
@@ -11,7 +11,7 @@ UI config flow and options flow.
 4) Install and restart Home Assistant
 
 ### Manual install
-Copy the `custom_components/smarter_flair_vents` folder into your Home Assistant
+Copy the `custom_components/hvac_vent_optimizer` folder into your Home Assistant
 `config/custom_components` directory, then restart Home Assistant.
 
 ## Support
@@ -51,25 +51,34 @@ Below is a feature inventory derived from the original Hubitat implementation. I
 retained as a parity checklist for the Home Assistant port and grouped into functional
 features and non-functional behaviors.
 
+## Efficiency model specification (implementation guide)
+
+The recommended approach is a regime-aware baseline model that hardens a room’s
+baseline efficiency over time while allowing temporary shifts to secondary modes
+(e.g., doors open, occupancy, duct temperature shifts). This prevents overreacting
+to short-term variability while still adapting to meaningful changes.
+
+Full specification (measurement windows, formulas, regime model, and defaults):
+- `docs/efficiency_model_spec.md`
+
 ## Configuration guide (user-friendly)
 
 ### Initial setup (Config Flow)
 When you add the integration:
-- **Client ID / Client Secret**: OAuth 2.0 credentials from your Flair developer app.
-  - Must be a **Client Credentials** app (not password login).
-  - If you see `invalid_scope`, your app is missing requested scopes; see Troubleshooting.
-- **Structure selection** (if you have multiple homes): choose which structure to manage.
+- **Vent brand**: choose Flair or Manual.
+- **Flair**: provide OAuth 2.0 Client ID/Secret and select a structure.
+- **Manual**: enter the number of vents, name each vent, and select a thermostat + room temperature sensor.
 
 ### Options (Options Flow)
 
 **Algorithm & Polling Settings**
 - **Use Dynamic Airflow Balancing (DAB)**: Enables the adaptive vent-balancing algorithm.
   - If disabled, vents are not automatically adjusted by the integration.
-- **Force structure mode to manual**: When DAB is enabled, force Flair structure mode to
+- **Force structure mode to manual**: When DAB is enabled, force vendor structure mode to
   `manual` to allow vent control. Disable if you prefer to keep Flair in `auto` and
   understand that DAB may not work reliably.
 - **Close vents in inactive rooms**: If enabled, DAB will close vents for rooms marked
-  inactive (Flair "away" rooms).
+  inactive (inactive rooms).
 - **Vent adjustment granularity (%)**: Rounds vent changes to a set increment (5/10/25/50/100).
   - Smaller values = finer control, more frequent adjustments.
   - Larger values = fewer adjustments, less vent wear.
@@ -82,24 +91,29 @@ When you add the integration:
 **Vent Assignments**
 - **Thermostat per vent**: Each vent must be mapped to the thermostat that controls the
   HVAC serving that room.
-- **Optional temperature sensor per vent**: Overrides Flair room temperature with a
+- **Optional temperature sensor per vent**: Overrides vendor room temperature with a
   specific HA sensor (e.g., room sensor).
 
+**Manual Mode**
+- Manual mode creates a **Manual Aperture** number entity per vent.
+- DAB computes **Suggested Aperture** sensors you can apply by hand.
+- Use the thermostat + room temperature sensors you selected to drive the calculations.
+
 **Conventional Vent Counts**
-- **Conventional vents per thermostat**: Number of non-Flair (standard) vents on that HVAC
+- **Conventional vents per thermostat**: Number of non-smart (standard) vents on that HVAC
   system. Used to prevent total airflow from dropping too low when DAB closes vents.
 
 ## Services
 
-- `smarter_flair_vents.set_room_active`: Set a room to active/inactive by room_id or vent_id.
-- `smarter_flair_vents.set_room_setpoint`: Set room setpoint (C) by room_id or vent_id.
-- `smarter_flair_vents.set_structure_mode`: Force structure mode `auto`/`manual`.
-- `smarter_flair_vents.run_dab`: Manually trigger a DAB run (optional thermostat filter).
-- `smarter_flair_vents.refresh_devices`: Force a refresh (useful after adding hardware).
-- `smarter_flair_vents.export_efficiency`: Export learned efficiency to a JSON file.
-  - `efficiency_path` is optional (defaults to `smarter_flair_vents_efficiency_export_<entry>.json`).
+- `hvac_vent_optimizer.set_room_active`: Set a room to active/inactive by room_id or vent_id.
+- `hvac_vent_optimizer.set_room_setpoint`: Set room setpoint (C) by room_id or vent_id.
+- `hvac_vent_optimizer.set_structure_mode`: Force structure mode `auto`/`manual`.
+- `hvac_vent_optimizer.run_dab`: Manually trigger a DAB run (optional thermostat filter).
+- `hvac_vent_optimizer.refresh_devices`: Force a refresh (useful after adding hardware).
+- `hvac_vent_optimizer.export_efficiency`: Export learned efficiency to a JSON file.
+  - `efficiency_path` is optional (defaults to `hvac_vent_optimizer_efficiency_export_<entry>.json`).
   - Path must be under your HA config directory.
-- `smarter_flair_vents.import_efficiency`: Import learned efficiency from a JSON file.
+- `hvac_vent_optimizer.import_efficiency`: Import learned efficiency from a JSON file.
   - Use either `efficiency_path` (file under your HA config directory),
     `efficiency_payload` (inline JSON), or pass `exportMetadata` + `efficiencyData`
     directly in the service call.
@@ -140,7 +154,7 @@ pip install pytest-homeassistant-custom-component
 
 2) Run the integration tests:
 ```
-pytest -q config/custom_components/smarter_flair_vents/tests_integration
+pytest -q config/custom_components/hvac_vent_optimizer/tests_integration
 ```
 
 ## Manual refresh (optional)
@@ -149,7 +163,7 @@ A lightweight service is available to force a refresh if you add/rename devices
 and want them to appear immediately:
 
 ```
-service: smarter_flair_vents.refresh_devices
+service: hvac_vent_optimizer.refresh_devices
 ```
 
 ## Functional features (Hubitat parity reference)
@@ -212,27 +226,24 @@ service: smarter_flair_vents.refresh_devices
 ## Non-functional behaviors (Hubitat parity reference)
 
 ### Performance & concurrency
-- Throttling for API calls to avoid rate limits:
-  - Max concurrent requests (Hubitat used 8).
-  - Delay/retry when throttled (Hubitat used 3s).
-- Retry logic with capped attempts (Hubitat used 5).
+- API rate limiting to avoid throttling:
+  - Basic endpoints: 4 requests/second.
+  - Search endpoints: 1 request/second.
+  - HTTP 429: waits for `Retry-After` (or 1s) and retries once.
 
 ### Caching
-- Short-lived caches for room and device readings (Hubitat used ~30s).
-- LRU eviction and periodic cleanup tasks.
-- Pending-request tracking to prevent duplicate API calls.
+- Per-refresh task cache to avoid duplicate remote-sensor requests during a single update cycle.
 
 ### Resilience & error handling
 - Treat 401/403 as auth failures and re-auth automatically.
 - Log and skip 404s for missing pucks/sensors rather than failing.
-- Handle occasional hub load exceptions without breaking the flow.
+- Handle transient API failures without breaking the flow.
 
 ### Scheduling & timing
-- Periodic cleanup tasks for caches and pending flags.
 - HVAC state change listeners to switch polling strategy.
 
 ### Data storage
-- Token and cached state stored per integration instance.
+- Token stored in-memory per integration instance.
 - Efficiency data persisted to storage for reuse across restarts.
 
 ### Observability

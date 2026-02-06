@@ -1,8 +1,8 @@
-import asyncio
+﻿import asyncio
 from types import SimpleNamespace
 
-from smarter_flair_vents.climate import FlairRoomClimate
-from smarter_flair_vents.sensor import FlairRoomSensor, ROOM_SENSOR_DESCRIPTIONS
+from custom_components.hvac_vent_optimizer.climate import FlairRoomClimate
+from custom_components.hvac_vent_optimizer.sensor import FlairRoomSensor, ROOM_SENSOR_DESCRIPTIONS
 
 
 class _FakeApi:
@@ -18,6 +18,7 @@ class _FakeCoordinator:
         self.data = data
         self.entry = SimpleNamespace(options=assignments or {})
         self.api = _FakeApi()
+        self.last_update_success = True
 
     def get_room_by_id(self, room_id):
         for vent in self.data.get("vents", {}).values():
@@ -29,7 +30,7 @@ class _FakeCoordinator:
     def get_room_device_info(self, room):
         room_id = room.get("id")
         name = (room.get("attributes") or {}).get("name") or f"Room {room_id}"
-        return {"identifiers": {("smarter_flair_vents", f"room_{room_id}")}, "name": name}
+        return {"identifiers": {("hvac_vent_optimizer", f"room_{room_id}")}, "name": name}
 
     def get_room_temperature(self, room_id):
         room = self.get_room_by_id(room_id)
@@ -41,6 +42,9 @@ class _FakeCoordinator:
 
     async def async_request_refresh(self):
         return None
+
+    def is_manual_brand(self):
+        return False
 
 
 def test_room_sensors_values():
@@ -64,7 +68,26 @@ def test_room_sensors_values():
 
     assert temp_sensor.native_value == 22.5
     assert thermostat_sensor.native_value == "climate.main"
-    assert temp_sensor.device_info["identifiers"] == {("smarter_flair_vents", "room_room1")}
+    assert temp_sensor.device_info["identifiers"] == {("hvac_vent_optimizer", "room_room1")}
+
+
+def test_room_sensor_availability_checks():
+    coordinator = _FakeCoordinator(
+        {"vents": {"v1": {"room": {"id": "room1", "attributes": {"name": "Office"}}}}}
+    )
+    temp_desc = next(d for d in ROOM_SENSOR_DESCRIPTIONS if d.key == "room_temperature")
+    temp_sensor = FlairRoomSensor(coordinator, "entry1", "room1", temp_desc)
+
+    coordinator.last_update_success = False
+    assert temp_sensor.available is False
+
+    coordinator.last_update_success = True
+    coordinator.data["vents"]["v1"]["room"] = {}
+    assert temp_sensor.available is False
+
+    coordinator.data["vents"]["v1"]["room"] = {"id": "room1", "attributes": {}}
+    coordinator.get_room_temperature = lambda room_id: None
+    assert temp_sensor.available is False
 
 
 def test_room_climate_setpoint():

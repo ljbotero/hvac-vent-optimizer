@@ -1,4 +1,4 @@
-from smarter_flair_vents.binary_sensor import FlairPuckOccupancyBinarySensor
+﻿from custom_components.hvac_vent_optimizer.binary_sensor import FlairPuckOccupancyBinarySensor
 from types import SimpleNamespace
 
 
@@ -13,7 +13,7 @@ class _FakeCoordinator:
         if not room_id:
             return None
         name = (room.get("attributes") or {}).get("name") or f"Room {room_id}"
-        return {"identifiers": {("smarter_flair_vents", f"room_{room_id}")}, "name": name}
+        return {"identifiers": {("hvac_vent_optimizer", f"room_{room_id}")}, "name": name}
 
 
 def test_occupancy_from_puck_attributes():
@@ -30,7 +30,7 @@ def test_occupancy_from_puck_attributes():
     )
     sensor = FlairPuckOccupancyBinarySensor(coordinator, "entry", "p1")
     assert sensor.is_on is True
-    assert sensor.device_info["identifiers"] == {("smarter_flair_vents", "room_room1")}
+    assert sensor.device_info["identifiers"] == {("hvac_vent_optimizer", "room_room1")}
 
 
 def test_occupancy_from_room_attributes():
@@ -50,10 +50,10 @@ def test_occupancy_from_room_attributes():
 
 
 def test_async_setup_entry_adds_entities():
-    from smarter_flair_vents import binary_sensor as binary_module
+    from custom_components.hvac_vent_optimizer import binary_sensor as binary_module
 
     coordinator = _FakeCoordinator({"pucks": {"p1": {"name": "P1", "attributes": {}}}})
-    hass = SimpleNamespace(data={"smarter_flair_vents": {"entry1": coordinator}})
+    hass = SimpleNamespace(data={"hvac_vent_optimizer": {"entry1": coordinator}})
     entry = SimpleNamespace(entry_id="entry1")
     added = []
 

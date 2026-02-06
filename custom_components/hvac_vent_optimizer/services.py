@@ -1,4 +1,4 @@
-"""Service handlers for Smarter Flair Vents."""
+"""Service handlers for HVAC Vent Optimizer."""
 from __future__ import annotations
 
 import json
@@ -128,6 +128,8 @@ async def async_register_services(hass: HomeAssistant) -> None:
         coordinator = _get_coordinator(hass, call.data.get(CONF_ENTRY_ID))
         if not coordinator:
             return
+        if coordinator.is_manual_brand():
+            raise ValueError("set_room_active is not available in Manual mode")
 
         room_id = call.data.get(CONF_ROOM_ID)
         vent_id = call.data.get(CONF_VENT_ID)
@@ -145,7 +147,7 @@ async def async_register_services(hass: HomeAssistant) -> None:
             persistent_notification.async_create(
                 hass,
                 f"Failed to set room active for {room_id}: {err}",
-                title="Smarter Flair Vents error",
+                title="HVAC Vent Optimizer error",
             )
 
     async def handle_run_dab(call: ServiceCall) -> None:
@@ -159,13 +161,15 @@ async def async_register_services(hass: HomeAssistant) -> None:
             persistent_notification.async_create(
                 hass,
                 f"Failed to run DAB: {err}",
-                title="Smarter Flair Vents error",
+                title="HVAC Vent Optimizer error",
             )
 
     async def handle_set_structure_mode(call: ServiceCall) -> None:
         coordinator = _get_coordinator(hass, call.data.get(CONF_ENTRY_ID))
         if not coordinator:
             return
+        if coordinator.is_manual_brand():
+            raise ValueError("set_structure_mode is not available in Manual mode")
         structure_id = coordinator.entry.data.get(CONF_STRUCTURE_ID)
         if not structure_id:
             _LOGGER.error("Missing structure_id in config entry")
@@ -180,13 +184,15 @@ async def async_register_services(hass: HomeAssistant) -> None:
             persistent_notification.async_create(
                 hass,
                 f"Failed to set structure mode: {err}",
-                title="Smarter Flair Vents error",
+                title="HVAC Vent Optimizer error",
             )
 
     async def handle_set_room_setpoint(call: ServiceCall) -> None:
         coordinator = _get_coordinator(hass, call.data.get(CONF_ENTRY_ID))
         if not coordinator:
             return
+        if coordinator.is_manual_brand():
+            raise ValueError("set_room_setpoint is not available in Manual mode")
 
         room_id = call.data.get(CONF_ROOM_ID)
         vent_id = call.data.get(CONF_VENT_ID)
@@ -209,13 +215,15 @@ async def async_register_services(hass: HomeAssistant) -> None:
             persistent_notification.async_create(
                 hass,
                 f"Failed to set room setpoint for {room_id}: {err}",
-                title="Smarter Flair Vents error",
+                title="HVAC Vent Optimizer error",
             )
 
     async def handle_refresh_devices(call: ServiceCall) -> None:
         coordinator = _get_coordinator(hass, call.data.get(CONF_ENTRY_ID))
         if not coordinator:
             return
+        if coordinator.is_manual_brand():
+            raise ValueError("refresh_devices is not available in Manual mode")
         try:
             await coordinator.async_request_refresh()
         except Exception as err:  # noqa: BLE001
@@ -223,7 +231,7 @@ async def async_register_services(hass: HomeAssistant) -> None:
             persistent_notification.async_create(
                 hass,
                 f"Failed to refresh devices: {err}",
-                title="Smarter Flair Vents error",
+                title="HVAC Vent Optimizer error",
             )
 
     async def handle_export_efficiency(call: ServiceCall) -> dict[str, Any]:
@@ -250,7 +258,7 @@ async def async_register_services(hass: HomeAssistant) -> None:
             persistent_notification.async_create(
                 hass,
                 f"Failed to export efficiency data: {err}",
-                title="Smarter Flair Vents error",
+                title="HVAC Vent Optimizer error",
             )
             return {"error": str(err)}
 
@@ -287,7 +295,7 @@ async def async_register_services(hass: HomeAssistant) -> None:
             persistent_notification.async_create(
                 hass,
                 f"Failed to import efficiency data: {err}",
-                title="Smarter Flair Vents error",
+                title="HVAC Vent Optimizer error",
             )
 
     hass.services.async_register(
@@ -374,7 +382,7 @@ def _get_coordinator(hass: HomeAssistant, entry_id: str | None) -> FlairCoordina
     if len(coordinators) == 1:
         return coordinators[0]
 
-    _LOGGER.error("Multiple Flair entries found; specify entry_id")
+    _LOGGER.error("Multiple entries found; specify entry_id")
     return None
 
 

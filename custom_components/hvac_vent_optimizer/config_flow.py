@@ -1,4 +1,4 @@
-"""Config flow for Smarter Flair Vents integration."""
+"""Config flow for HVAC Vent Optimizer integration."""
 from __future__ import annotations
 
 import logging
@@ -11,6 +11,8 @@ from homeassistant.helpers import aiohttp_client, selector
 
 from .api import FlairApi, FlairApiAuthError, FlairApiError
 from .const import (
+    BRAND_FLAIR,
+    BRAND_MANUAL,
     CONF_CLIENT_ID,
     CONF_CLIENT_SECRET,
     CONF_CLOSE_INACTIVE_ROOMS,
@@ -31,11 +33,15 @@ from .const import (
     CONF_TEMP_SENSOR_ENTITY,
     CONF_THERMOSTAT_ENTITY,
     CONF_VENT_ASSIGNMENTS,
+    CONF_VENT_BRAND,
     CONF_VENT_GRANULARITY,
+    CONF_MANUAL_VENT_COUNT,
+    CONF_MANUAL_VENTS,
     DEFAULT_CLOSE_INACTIVE_ROOMS,
     DEFAULT_CONVENTIONAL_VENTS,
     DEFAULT_DAB_ENABLED,
     DEFAULT_DAB_FORCE_MANUAL,
+    DEFAULT_MANUAL_VENT_COUNT,
     DEFAULT_INITIAL_EFFICIENCY_PERCENT,
     DEFAULT_NOTIFY_EFFICIENCY_CHANGES,
     DEFAULT_LOG_EFFICIENCY_CHANGES,
@@ -47,13 +53,14 @@ from .const import (
     DEFAULT_POLL_INTERVAL_IDLE,
     DEFAULT_VENT_GRANULARITY,
     DOMAIN,
+    MAX_CONVENTIONAL_VENTS,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
 
-class SmarterFlairVentsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    """Handle a config flow for Smarter Flair Vents."""
+class HvacVentOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+    """Handle a config flow for HVAC Vent Optimizer."""
 
     VERSION = 1
 
@@ -61,9 +68,37 @@ class SmarterFlairVentsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._client_id: str | None = None
         self._client_secret: str | None = None
         self._structures: dict[str, str] = {}
+        self._brand: str | None = None
+        self._manual_vent_count: int | None = None
+        self._manual_vent_defs: list[dict[str, Any]] = []
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None):
-        """Handle the initial step."""
+        """Select vent brand."""
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            self._brand = user_input[CONF_VENT_BRAND]
+            if self._brand == BRAND_FLAIR:
+                return await self.async_step_flair_auth()
+            return await self.async_step_manual_count()
+
+        return self.async_show_form(
+            step_id="user",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_VENT_BRAND, default=BRAND_FLAIR): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=[BRAND_FLAIR, BRAND_MANUAL],
+                            mode=selector.SelectSelectorMode.DROPDOWN,
+                        )
+                    )
+                }
+            ),
+            errors=errors,
+        )
+
+    async def async_step_flair_auth(self, user_input: dict[str, Any] | None = None):
+        """Authenticate with Flair for device discovery."""
         errors: dict[str, str] = {}
 
         if user_input is not None:
@@ -109,13 +144,89 @@ class SmarterFlairVentsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     return await self.async_step_structure()
 
         return self.async_show_form(
-            step_id="user",
+            step_id="flair_auth",
             data_schema=vol.Schema(
                 {
                     vol.Required(CONF_CLIENT_ID): str,
                     vol.Required(CONF_CLIENT_SECRET): str,
                 }
             ),
+            errors=errors,
+        )
+
+    async def async_step_manual_count(self, user_input: dict[str, Any] | None = None):
+        """Select number of manual vents."""
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            self._manual_vent_count = int(user_input[CONF_MANUAL_VENT_COUNT])
+            return await self.async_step_manual_vents()
+
+        return self.async_show_form(
+            step_id="manual_count",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_MANUAL_VENT_COUNT,
+                        default=DEFAULT_MANUAL_VENT_COUNT,
+                    ): vol.All(vol.Coerce(int), vol.Range(min=1, max=50)),
+                }
+            ),
+            errors=errors,
+        )
+
+    async def async_step_manual_vents(self, user_input: dict[str, Any] | None = None):
+        """Configure manual vent definitions."""
+        errors: dict[str, str] = {}
+        count = self._manual_vent_count or DEFAULT_MANUAL_VENT_COUNT
+
+        if user_input is not None:
+            manual_vents: list[dict[str, Any]] = []
+            vent_assignments: dict[str, dict[str, Any]] = {}
+            for i in range(1, count + 1):
+                vent_id = f"manual_{i}"
+                name = user_input[f"manual_{i}_name"]
+                thermostat = user_input[f"manual_{i}_thermostat"]
+                temp_sensor = user_input[f"manual_{i}_temp_sensor"]
+                manual_vents.append(
+                    {
+                        "id": vent_id,
+                        "name": name,
+                        CONF_THERMOSTAT_ENTITY: thermostat,
+                        CONF_TEMP_SENSOR_ENTITY: temp_sensor,
+                    }
+                )
+                vent_assignments[vent_id] = {
+                    "vent_name": name,
+                    CONF_THERMOSTAT_ENTITY: thermostat,
+                    CONF_TEMP_SENSOR_ENTITY: temp_sensor,
+                }
+
+            return self.async_create_entry(
+                title="HVAC Vent Optimizer (Manual)",
+                data={
+                    CONF_VENT_BRAND: BRAND_MANUAL,
+                    CONF_MANUAL_VENT_COUNT: count,
+                    CONF_MANUAL_VENTS: manual_vents,
+                    CONF_VENT_ASSIGNMENTS: vent_assignments,
+                },
+            )
+
+        data_schema: dict[Any, Any] = {}
+        thermostat_selector = selector.EntitySelector(
+            selector.EntitySelectorConfig(domain="climate")
+        )
+        temp_sensor_selector = selector.EntitySelector(
+            selector.EntitySelectorConfig(domain="sensor", device_class="temperature")
+        )
+        for i in range(1, count + 1):
+            data_schema[vol.Required(f"manual_{i}_name", default=f"Vent {i}")] = str
+            data_schema[vol.Required(f"manual_{i}_thermostat")] = thermostat_selector
+            data_schema[vol.Required(f"manual_{i}_temp_sensor")] = temp_sensor_selector
+
+        return self.async_show_form(
+            step_id="manual_vents",
+            data_schema=vol.Schema(data_schema),
             errors=errors,
         )
 
@@ -147,6 +258,7 @@ class SmarterFlairVentsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_create_entry(
             title=self._structures.get(structure_id, structure_id),
             data={
+                CONF_VENT_BRAND: BRAND_FLAIR,
                 CONF_CLIENT_ID: self._client_id,
                 CONF_CLIENT_SECRET: self._client_secret,
                 CONF_STRUCTURE_ID: structure_id,
@@ -158,11 +270,11 @@ class SmarterFlairVentsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     @callback
     def async_get_options_flow(config_entry: config_entries.ConfigEntry):
         """Get the options flow for this handler."""
-        return SmarterFlairVentsOptionsFlow(config_entry)
+        return HvacVentOptimizerOptionsFlow(config_entry)
 
 
-class SmarterFlairVentsOptionsFlow(config_entries.OptionsFlowWithConfigEntry):
-    """Handle options for Smarter Flair Vents."""
+class HvacVentOptimizerOptionsFlow(config_entries.OptionsFlowWithConfigEntry):
+    """Handle options for HVAC Vent Optimizer."""
 
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
         super().__init__(config_entry)
@@ -170,18 +282,148 @@ class SmarterFlairVentsOptionsFlow(config_entries.OptionsFlowWithConfigEntry):
         self._thermostat_key_map: dict[str, str] = {}
         self._vent_key_map: dict[str, str] = {}
         self._temp_sensor_key_map: dict[str, str] = {}
+        self._manual_vent_count: int | None = None
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None):
         return await self.async_step_menu()
 
     async def async_step_menu(self, user_input: dict[str, Any] | None = None):
+        brand = self._get_brand()
+        menu_options: dict[str, str] = {
+            "brand_manual": "Vent Brand & Manual Setup",
+            "algorithm_settings": "Dynamic Airflow Balancing & Polling",
+            "conventional_vents": "Conventional Vent Counts (Airflow Safety)",
+        }
+        if brand == BRAND_FLAIR:
+            menu_options["vent_assignments"] = "Thermostat & Sensor Assignments"
         return self.async_show_menu(
             step_id="menu",
-            menu_options={
-                "algorithm_settings": "Dynamic Airflow Balancing & Polling",
-                "vent_assignments": "Thermostat & Sensor Assignments",
-                "conventional_vents": "Conventional Vent Counts (Airflow Safety)",
-            },
+            menu_options=menu_options,
+        )
+
+    def _get_brand(self) -> str:
+        return self.config_entry.options.get(
+            CONF_VENT_BRAND, self.config_entry.data.get(CONF_VENT_BRAND, BRAND_FLAIR)
+        )
+
+    def _get_manual_vents(self) -> list[dict[str, Any]]:
+        return self.config_entry.options.get(
+            CONF_MANUAL_VENTS, self.config_entry.data.get(CONF_MANUAL_VENTS, [])
+        )
+
+    async def async_step_brand_manual(self, user_input: dict[str, Any] | None = None):
+        errors: dict[str, str] = {}
+        options = dict(self.config_entry.options)
+
+        if user_input is not None:
+            brand = user_input[CONF_VENT_BRAND]
+            options[CONF_VENT_BRAND] = brand
+            if brand == BRAND_MANUAL:
+                return await self.async_step_manual_count()
+            options.pop(CONF_MANUAL_VENT_COUNT, None)
+            options.pop(CONF_MANUAL_VENTS, None)
+            return self.async_create_entry(title="", data=options)
+
+        return self.async_show_form(
+            step_id="brand_manual",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_VENT_BRAND,
+                        default=self._get_brand(),
+                    ): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=[BRAND_FLAIR, BRAND_MANUAL],
+                            mode=selector.SelectSelectorMode.DROPDOWN,
+                        )
+                    ),
+                }
+            ),
+            errors=errors,
+        )
+
+    async def async_step_manual_count(self, user_input: dict[str, Any] | None = None):
+        """Select number of manual vents (options flow)."""
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            self._manual_vent_count = int(user_input[CONF_MANUAL_VENT_COUNT])
+            return await self.async_step_manual_vents()
+
+        return self.async_show_form(
+            step_id="manual_count",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_MANUAL_VENT_COUNT,
+                        default=self.config_entry.options.get(
+                            CONF_MANUAL_VENT_COUNT,
+                            self.config_entry.data.get(
+                                CONF_MANUAL_VENT_COUNT, DEFAULT_MANUAL_VENT_COUNT
+                            ),
+                        ),
+                    ): vol.All(vol.Coerce(int), vol.Range(min=1, max=50)),
+                }
+            ),
+            errors=errors,
+        )
+
+    async def async_step_manual_vents(self, user_input: dict[str, Any] | None = None):
+        errors: dict[str, str] = {}
+        options = dict(self.config_entry.options)
+
+        count = self._manual_vent_count or self.config_entry.options.get(
+            CONF_MANUAL_VENT_COUNT,
+            self.config_entry.data.get(CONF_MANUAL_VENT_COUNT, DEFAULT_MANUAL_VENT_COUNT),
+        )
+
+        if user_input is not None:
+            manual_vents: list[dict[str, Any]] = []
+            vent_assignments: dict[str, dict[str, Any]] = {}
+            for i in range(1, count + 1):
+                vent_id = f"manual_{i}"
+                name = user_input[f"manual_{i}_name"]
+                thermostat = user_input[f"manual_{i}_thermostat"]
+                temp_sensor = user_input[f"manual_{i}_temp_sensor"]
+                manual_vents.append(
+                    {
+                        "id": vent_id,
+                        "name": name,
+                        CONF_THERMOSTAT_ENTITY: thermostat,
+                        CONF_TEMP_SENSOR_ENTITY: temp_sensor,
+                    }
+                )
+                vent_assignments[vent_id] = {
+                    "vent_name": name,
+                    CONF_THERMOSTAT_ENTITY: thermostat,
+                    CONF_TEMP_SENSOR_ENTITY: temp_sensor,
+                }
+
+            options[CONF_VENT_BRAND] = BRAND_MANUAL
+            options[CONF_MANUAL_VENT_COUNT] = count
+            options[CONF_MANUAL_VENTS] = manual_vents
+            options[CONF_VENT_ASSIGNMENTS] = vent_assignments
+            return self.async_create_entry(title="", data=options)
+
+        thermostat_selector = selector.EntitySelector(
+            selector.EntitySelectorConfig(domain="climate")
+        )
+        temp_sensor_selector = selector.EntitySelector(
+            selector.EntitySelectorConfig(domain="sensor", device_class="temperature")
+        )
+        existing = {v.get("id"): v for v in self._get_manual_vents()}
+        data_schema: dict[Any, Any] = {}
+        for i in range(1, count + 1):
+            vent_id = f"manual_{i}"
+            existing_vent = existing.get(vent_id, {})
+            data_schema[vol.Required(f"manual_{i}_name", default=existing_vent.get("name", f"Vent {i}"))] = str
+            data_schema[vol.Required(f"manual_{i}_thermostat", default=existing_vent.get(CONF_THERMOSTAT_ENTITY))] = thermostat_selector
+            data_schema[vol.Required(f"manual_{i}_temp_sensor", default=existing_vent.get(CONF_TEMP_SENSOR_ENTITY))] = temp_sensor_selector
+
+        return self.async_show_form(
+            step_id="manual_vents",
+            data_schema=vol.Schema(data_schema),
+            errors=errors,
         )
 
     async def async_step_algorithm_settings(self, user_input: dict[str, Any] | None = None):
@@ -389,7 +631,7 @@ class SmarterFlairVentsOptionsFlow(config_entries.OptionsFlowWithConfigEntry):
     async def async_step_conventional_vents(self, user_input: dict[str, Any] | None = None):
         errors: dict[str, str] = {}
         options = dict(self.config_entry.options)
-        assignments = options.get(CONF_VENT_ASSIGNMENTS, {})
+        assignments = options.get(CONF_VENT_ASSIGNMENTS, self.config_entry.data.get(CONF_VENT_ASSIGNMENTS, {}))
 
         if not assignments:
             errors["base"] = "no_assignments"
@@ -422,7 +664,7 @@ class SmarterFlairVentsOptionsFlow(config_entries.OptionsFlowWithConfigEntry):
             key = _safe_key("conv", thermostat_id)
             self._thermostat_key_map[key] = thermostat_id
             data_schema[vol.Required(key, default=existing.get(thermostat_id, 0))] = vol.All(
-                vol.Coerce(int), vol.Range(min=0)
+                vol.Coerce(int), vol.Range(min=0, max=MAX_CONVENTIONAL_VENTS)
             )
 
         return self.async_show_form(

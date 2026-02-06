@@ -1,4 +1,4 @@
-from utils import is_fahrenheit_unit
+from custom_components.hvac_vent_optimizer.utils import is_fahrenheit_unit
 
 
 def test_is_fahrenheit_unit_accepts_common_forms():

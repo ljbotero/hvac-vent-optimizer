@@ -1,7 +1,7 @@
 import asyncio
 from unittest.mock import MagicMock
 
-from api import FlairApi, FlairApiError
+from custom_components.hvac_vent_optimizer.api import FlairApi, FlairApiError
 
 
 def test_remote_sensor_reading_current():
@@ -53,3 +53,9 @@ def test_puck_reading_handles_list_payload():
     api._async_request = fake_request
     result = asyncio.run(api.async_get_puck_reading("puck-1"))
     assert result["current-temperature-c"] == 21.5
+
+
+def test_rate_limiter_selection():
+    api = FlairApi(MagicMock(), "id", "secret")
+    assert api._get_rate_limiter("/api/structures") is api._basic_limiter
+    assert api._get_rate_limiter("/api/vents/search") is api._search_limiter

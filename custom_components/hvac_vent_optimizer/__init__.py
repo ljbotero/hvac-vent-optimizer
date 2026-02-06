@@ -1,4 +1,4 @@
-"""Smarter Flair Vents integration."""
+"""HVAC Vent Optimizer integration."""
 from __future__ import annotations
 
 from homeassistant.config_entries import ConfigEntry
@@ -7,6 +7,8 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import FlairApi
 from .const import (
+    BRAND_FLAIR,
+    CONF_VENT_BRAND,
     CONF_CLIENT_ID,
     CONF_CLIENT_SECRET,
     DOMAIN,
@@ -17,15 +19,18 @@ from .services import async_register_services, async_unregister_services
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Set up Smarter Flair Vents from a config entry."""
+    """Set up HVAC Vent Optimizer from a config entry."""
     hass.data.setdefault(DOMAIN, {})
 
-    session = async_get_clientsession(hass)
-    api = FlairApi(
-        session,
-        entry.data[CONF_CLIENT_ID],
-        entry.data[CONF_CLIENT_SECRET],
-    )
+    brand = entry.options.get(CONF_VENT_BRAND, entry.data.get(CONF_VENT_BRAND, BRAND_FLAIR))
+    api = None
+    if brand == BRAND_FLAIR:
+        session = async_get_clientsession(hass)
+        api = FlairApi(
+            session,
+            entry.data[CONF_CLIENT_ID],
+            entry.data[CONF_CLIENT_SECRET],
+        )
 
     coordinator = FlairCoordinator(hass, api, entry)
     await coordinator.async_initialize()

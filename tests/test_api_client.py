@@ -1,15 +1,16 @@
-import asyncio
+﻿import asyncio
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from smarter_flair_vents.api import FlairApi, FlairApiAuthError, FlairApiError
+from custom_components.hvac_vent_optimizer.api import FlairApi, FlairApiAuthError, FlairApiError
 
 
 class _FakeResponse:
     def __init__(self, status, payload):
         self.status = status
         self._payload = payload
+        self.headers = {}
 
     async def json(self):
         return self._payload
@@ -56,6 +57,17 @@ class _SequencedSession(_FakeSession):
     def post(self, url, **kwargs):
         self.post_calls.append((url, kwargs))
         self.last_request = ("POST", url, kwargs)
+        return self.responses.pop(0)
+
+
+class _SequencedRequestSession(_FakeSession):
+    def __init__(self, responses):
+        self.responses = list(responses)
+        super().__init__(self.responses[0])
+
+    async def request(self, method, url, **kwargs):
+        self.last_request = (method, url, kwargs)
+        self.last_headers = kwargs.get("headers", {})
         return self.responses.pop(0)
 
 
@@ -187,6 +199,44 @@ def test_set_room_setpoint_payload():
     assert calls["json"]["data"]["attributes"]["hold-until"] == "2024-01-01T00:00:00Z"
 
 
+def test_async_get_vent_reading_handles_list_payload_and_missing_pressure():
+    api = FlairApi(_FakeSession(_FakeResponse(200, {})), "id", "secret")
+
+    async def fake_request(method, path, **kwargs):
+        return {"data": [{"attributes": {"system-voltage": 2.8}}]}
+
+    api._async_request = fake_request
+    attrs = asyncio.run(api.async_get_vent_reading("vent1"))
+    assert attrs["system-voltage"] == 2.8
+    assert "vent1" in api._missing_pressure_logged
+
+
+def test_async_get_puck_reading_handles_empty_list():
+    api = FlairApi(_FakeSession(_FakeResponse(200, {})), "id", "secret")
+
+    async def fake_request(method, path, **kwargs):
+        return {"data": []}
+
+    api._async_request = fake_request
+    attrs = asyncio.run(api.async_get_puck_reading("puck1"))
+    assert attrs == {}
+
+
+def test_async_get_remote_sensor_reading_fallback():
+    api = FlairApi(_FakeSession(_FakeResponse(200, {})), "id", "secret")
+    calls = {"count": 0}
+
+    async def fake_request(method, path, **kwargs):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise FlairApiError("fail")
+        return {"data": {"attributes": {"occupied": True}}}
+
+    api._async_request = fake_request
+    attrs = asyncio.run(api.async_get_remote_sensor_reading("sensor1"))
+    assert attrs["occupied"] is True
+
+
 def test_set_structure_mode_payload():
     api = FlairApi(_FakeSession(_FakeResponse(200, {})), "id", "secret")
     calls = {}
@@ -222,6 +272,64 @@ def test_set_room_active_payload():
 def test_async_request_error_status():
     response = _FakeResponse(500, {})
     session = _FakeSession(response)
+    api = FlairApi(session, "id", "secret")
+    api._access_token = "token"
+    api._token_expires_at = datetime.now(timezone.utc) + timedelta(minutes=5)
+
+    with pytest.raises(FlairApiError):
+        asyncio.run(api._async_request("GET", "/api/test"))
+
+
+def test_async_request_retries_on_429(monkeypatch):
+    responses = [
+        _FakeResponse(429, {"error": "rate_limited"}),
+        _FakeResponse(200, {"data": []}),
+    ]
+    session = _SequencedRequestSession(responses)
+    api = FlairApi(session, "id", "secret")
+    api._access_token = "token"
+    api._token_expires_at = datetime.now(timezone.utc) + timedelta(minutes=5)
+
+    slept = []
+
+    async def fake_sleep(delay):
+        slept.append(delay)
+
+    monkeypatch.setattr("custom_components.hvac_vent_optimizer.api.asyncio.sleep", fake_sleep)
+    result = asyncio.run(api._async_request("GET", "/api/test"))
+    assert result == {"data": []}
+    assert slept
+
+
+def test_async_request_non_json_response_raises():
+    class _BadResponse(_FakeResponse):
+        async def json(self):
+            from aiohttp import ContentTypeError
+
+            raise ContentTypeError(request_info=None, history=None, message="bad")
+
+    response = _BadResponse(200, "not-json")
+    session = _FakeSession(response)
+    api = FlairApi(session, "id", "secret")
+    api._access_token = "token"
+    api._token_expires_at = datetime.now(timezone.utc) + timedelta(minutes=5)
+
+    with pytest.raises(FlairApiError):
+        asyncio.run(api._async_request("GET", "/api/test"))
+
+
+def test_async_request_retry_non_json_raises():
+    class _BadResponse(_FakeResponse):
+        async def json(self):
+            from aiohttp import ContentTypeError
+
+            raise ContentTypeError(request_info=None, history=None, message="bad")
+
+    responses = [
+        _FakeResponse(429, {"error": "rate_limited"}),
+        _BadResponse(200, "not-json"),
+    ]
+    session = _SequencedRequestSession(responses)
     api = FlairApi(session, "id", "secret")
     api._access_token = "token"
     api._token_expires_at = datetime.now(timezone.utc) + timedelta(minutes=5)

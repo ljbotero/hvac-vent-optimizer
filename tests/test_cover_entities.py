@@ -1,8 +1,8 @@
-import asyncio
+﻿import asyncio
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
-from smarter_flair_vents.cover import FlairVentCover
+from custom_components.hvac_vent_optimizer.cover import FlairVentCover
 
 
 class _FakeApi:
@@ -22,6 +22,9 @@ class _FakeCoordinator:
     async def async_request_refresh(self):
         self.refresh_called = True
 
+    def is_manual_brand(self):
+        return False
+
     def get_room_device_info_for_vent(self, vent_id):
         vent = self.data.get("vents", {}).get(vent_id, {})
         room = vent.get("room") or {}
@@ -29,7 +32,7 @@ class _FakeCoordinator:
         if not room_id:
             return None
         name = (room.get("attributes") or {}).get("name") or f"Room {room_id}"
-        return {"identifiers": {("smarter_flair_vents", f"room_{room_id}")}, "name": name}
+        return {"identifiers": {("hvac_vent_optimizer", f"room_{room_id}")}, "name": name}
 
 
 def test_cover_name_and_position():
@@ -48,7 +51,7 @@ def test_cover_name_and_position():
     entity = FlairVentCover(coordinator, "entry1", "v1")
     assert entity.name == "Office"
     assert entity.current_cover_position == 25
-    assert entity.device_info["identifiers"] == {("smarter_flair_vents", "room_room1")}
+    assert entity.device_info["identifiers"] == {("hvac_vent_optimizer", "room_room1")}
 
 
 def test_cover_set_position_calls_api():
@@ -88,13 +91,38 @@ def test_cover_pending_position_keeps_state_until_refresh():
     entity._handle_coordinator_update()
     assert entity.current_cover_position == 20
 
+
+def test_cover_available_and_pending_match_clears():
+    coordinator = _FakeCoordinator(
+        {"vents": {"v1": {"id": "v1", "name": "Office", "attributes": {"percent-open": 30}}}}
+    )
+    coordinator.last_update_success = True
+    entity = FlairVentCover(coordinator, "entry1", "v1")
+    assert entity.available is True
+
+    asyncio.run(entity.async_set_cover_position(position=60))
+    coordinator.data["vents"]["v1"]["attributes"]["percent-open"] = 60
+    entity._handle_coordinator_update()
+    assert entity.current_cover_position == 60
+    assert entity._pending_position is None
+
+
+def test_cover_unavailable_without_percent_open_or_update_failure():
+    coordinator = _FakeCoordinator({"vents": {"v1": {"id": "v1", "name": "Office", "attributes": {}}}})
+    coordinator.last_update_success = True
+    entity = FlairVentCover(coordinator, "entry1", "v1")
+    assert entity.available is False
+
+    coordinator.last_update_success = False
+    coordinator.data["vents"]["v1"]["attributes"]["percent-open"] = 25
+    assert entity.available is False
 def test_cover_async_setup_entry_adds_entities():
-    from smarter_flair_vents import cover as cover_module
+    from custom_components.hvac_vent_optimizer import cover as cover_module
 
     coordinator = _FakeCoordinator(
         {"vents": {"v1": {"id": "v1", "name": "Office", "attributes": {}}}}
     )
-    hass = SimpleNamespace(data={"smarter_flair_vents": {"entry1": coordinator}})
+    hass = SimpleNamespace(data={"hvac_vent_optimizer": {"entry1": coordinator}})
     entry = SimpleNamespace(entry_id="entry1")
     added = []
 
@@ -103,3 +131,19 @@ def test_cover_async_setup_entry_adds_entities():
 
     asyncio.run(cover_module.async_setup_entry(hass, entry, add_entities))
     assert len(added) == 1
+
+
+def test_cover_async_setup_entry_skips_manual():
+    from custom_components.hvac_vent_optimizer import cover as cover_module
+
+    coordinator = _FakeCoordinator({"vents": {"v1": {"id": "v1", "name": "Office", "attributes": {}}}})
+    coordinator.is_manual_brand = lambda: True
+    hass = SimpleNamespace(data={"hvac_vent_optimizer": {"entry1": coordinator}})
+    entry = SimpleNamespace(entry_id="entry1")
+    added = []
+
+    def add_entities(entities):
+        added.extend(entities)
+
+    asyncio.run(cover_module.async_setup_entry(hass, entry, add_entities))
+    assert added == []

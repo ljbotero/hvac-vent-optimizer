@@ -7,9 +7,9 @@ from homeassistant.components.sensor import SensorEntity, SensorEntityDescriptio
 from datetime import timezone
 from homeassistant.const import (
     PERCENTAGE,
+    UnitOfTemperature,
     SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
     UnitOfPressure,
-    UnitOfTemperature,
 )
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -32,10 +32,24 @@ class FlairVentSensorDescription(SensorEntityDescription):
 
 
 @dataclass(frozen=True)
+class FlairVentMetricSensorDescription(SensorEntityDescription):
+    """Describe a computed vent metric sensor."""
+
+    metric_key: str | None = None
+
+
+@dataclass(frozen=True)
 class FlairRoomSensorDescription(SensorEntityDescription):
     """Describe a Flair room sensor."""
 
     room_field: str | None = None
+
+
+@dataclass(frozen=True)
+class StrategyMetricSensorDescription(SensorEntityDescription):
+    """Describe a strategy effectiveness metric sensor."""
+
+    metric_key: str | None = None
 
 
 PUCK_SENSOR_DESCRIPTIONS: tuple[FlairPuckSensorDescription, ...] = (
@@ -89,6 +103,83 @@ SYSTEM_SENSOR_DESCRIPTION = SensorEntityDescription(
     key="strategy_effectiveness",
     name="DAB Strategy Effectiveness",
 )
+STRATEGY_METRIC_DESCRIPTIONS: tuple[StrategyMetricSensorDescription, ...] = (
+    StrategyMetricSensorDescription(
+        key="dab_avg_temp_error",
+        name="DAB Avg Temp Error",
+        metric_key="avg_temp_error",
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:thermometer",
+    ),
+    StrategyMetricSensorDescription(
+        key="dab_last_temp_error",
+        name="DAB Last Temp Error",
+        metric_key="last_temp_error",
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:thermometer-alert",
+    ),
+    StrategyMetricSensorDescription(
+        key="dab_avg_active_temp_error",
+        name="DAB Avg Active Temp Error",
+        metric_key="avg_active_temp_error",
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:thermometer-check",
+    ),
+    StrategyMetricSensorDescription(
+        key="dab_last_active_temp_error",
+        name="DAB Last Active Temp Error",
+        metric_key="last_active_temp_error",
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:thermometer-check",
+    ),
+    StrategyMetricSensorDescription(
+        key="dab_avg_adjustments",
+        name="DAB Avg Adjustments",
+        metric_key="avg_adjustments",
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:tune-variant",
+    ),
+    StrategyMetricSensorDescription(
+        key="dab_last_adjustments",
+        name="DAB Last Adjustments",
+        metric_key="last_adjustments",
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:tune-variant",
+    ),
+    StrategyMetricSensorDescription(
+        key="dab_avg_movement",
+        name="DAB Avg Movement",
+        metric_key="avg_movement",
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:percent",
+    ),
+    StrategyMetricSensorDescription(
+        key="dab_last_movement",
+        name="DAB Last Movement",
+        metric_key="last_movement",
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:percent",
+    ),
+    StrategyMetricSensorDescription(
+        key="dab_last_active_rooms",
+        name="DAB Active Rooms (Last Cycle)",
+        metric_key="last_active_rooms",
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:home-group",
+    ),
+)
+MANUAL_SUGGESTED_DESCRIPTION = SensorEntityDescription(
+    key="suggested_aperture",
+    name="Suggested Aperture",
+    native_unit_of_measurement=PERCENTAGE,
+    state_class=SensorStateClass.MEASUREMENT,
+)
 VENT_SENSOR_DESCRIPTIONS: tuple[FlairVentSensorDescription, ...] = (
     FlairVentSensorDescription(
         key="aperture",
@@ -136,6 +227,23 @@ VENT_SENSOR_DESCRIPTIONS: tuple[FlairVentSensorDescription, ...] = (
         device_class="timestamp",
     ),
 )
+VENT_METRIC_SENSOR_DESCRIPTIONS: tuple[FlairVentMetricSensorDescription, ...] = (
+    FlairVentMetricSensorDescription(
+        key="adjustments_24h",
+        name="Adjustments (24h)",
+        metric_key="count",
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:counter",
+    ),
+    FlairVentMetricSensorDescription(
+        key="movement_24h",
+        name="Movement (24h)",
+        metric_key="movement",
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:arrow-split-horizontal",
+    ),
+)
 
 ROOM_SENSOR_DESCRIPTIONS: tuple[FlairRoomSensorDescription, ...] = (
     FlairRoomSensorDescription(
@@ -168,6 +276,14 @@ async def async_setup_entry(hass, entry, async_add_entities):
     for vent_id in vents.keys():
         for description in VENT_SENSOR_DESCRIPTIONS:
             entities.append(FlairVentSensor(coordinator, entry.entry_id, vent_id, description))
+        for description in VENT_METRIC_SENSOR_DESCRIPTIONS:
+            entities.append(FlairVentMetricSensor(coordinator, entry.entry_id, vent_id, description))
+        if coordinator.is_manual_brand():
+            entities.append(
+                ManualSuggestedApertureSensor(
+                    coordinator, entry.entry_id, vent_id, MANUAL_SUGGESTED_DESCRIPTION
+                )
+            )
 
     rooms: dict[str, dict] = {}
     for vent in vents.values():
@@ -186,6 +302,8 @@ async def async_setup_entry(hass, entry, async_add_entities):
             entities.append(FlairRoomSensor(coordinator, entry.entry_id, room_id, description))
 
     entities.append(FlairSystemSensor(coordinator, entry.entry_id))
+    for description in STRATEGY_METRIC_DESCRIPTIONS:
+        entities.append(FlairStrategyMetricSensor(coordinator, entry.entry_id, description))
 
     async_add_entities(entities)
 
@@ -298,6 +416,55 @@ class FlairVentSensor(CoordinatorEntity, SensorEntity):
         return attrs.get(attribute) if attribute else None
 
 
+class FlairVentMetricSensor(CoordinatorEntity, SensorEntity):
+    """Computed 24h vent metrics (adjustments/movement)."""
+
+    entity_description: FlairVentMetricSensorDescription
+
+    def __init__(
+        self,
+        coordinator,
+        entry_id: str,
+        vent_id: str,
+        description: FlairVentMetricSensorDescription,
+    ) -> None:
+        super().__init__(coordinator)
+        self.entity_description = description
+        self._entry_id = entry_id
+        self._vent_id = vent_id
+        self._attr_unique_id = f"{entry_id}_vent_{vent_id}_{description.key}"
+
+    @property
+    def name(self):
+        vent = (self.coordinator.data or {}).get("vents", {}).get(self._vent_id, {})
+        vent_name = vent.get("name") or f"Vent {self._vent_id}"
+        return f"{vent_name} {self.entity_description.name}"
+
+    @property
+    def device_info(self):
+        return self.coordinator.get_room_device_info_for_vent(self._vent_id)
+
+    @property
+    def available(self) -> bool:
+        if not self.coordinator.last_update_success:
+            return False
+        vent = (self.coordinator.data or {}).get("vents", {}).get(self._vent_id)
+        return vent is not None
+
+    @property
+    def native_value(self):
+        stats = self.coordinator.get_vent_adjustment_stats(self._vent_id)
+        value = stats.get(self.entity_description.metric_key)
+        if value is None:
+            return None
+        if isinstance(value, (int, float)):
+            return value
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+
 class FlairRoomSensor(CoordinatorEntity, SensorEntity):
     """Room-level sensor values (temperature, thermostat)."""
 
@@ -362,3 +529,69 @@ class FlairSystemSensor(CoordinatorEntity, SensorEntity):
     @property
     def extra_state_attributes(self):
         return self.coordinator.get_strategy_metrics()
+
+
+class FlairStrategyMetricSensor(CoordinatorEntity, SensorEntity):
+    """Expose selected DAB strategy effectiveness metrics."""
+
+    entity_description: StrategyMetricSensorDescription
+
+    def __init__(
+        self,
+        coordinator,
+        entry_id: str,
+        description: StrategyMetricSensorDescription,
+    ) -> None:
+        super().__init__(coordinator)
+        self.entity_description = description
+        self._entry_id = entry_id
+        self._attr_unique_id = f"{entry_id}_{description.key}"
+
+    @property
+    def name(self):
+        return self.entity_description.name
+
+    @property
+    def native_value(self):
+        metrics = self.coordinator.get_strategy_metrics()
+        strategies = metrics.get("strategies") or {}
+        strategy = metrics.get("last_strategy")
+        if not strategy and strategies:
+            strategy = sorted(strategies.keys())[0]
+        if not strategy:
+            return None
+        data = strategies.get(strategy, {})
+        value = data.get(self.entity_description.metric_key)
+        if value is None:
+            return None
+        if isinstance(value, (int, float)):
+            return value
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+
+class ManualSuggestedApertureSensor(CoordinatorEntity, SensorEntity):
+    """Suggested aperture sensor for manual vents."""
+
+    def __init__(self, coordinator, entry_id: str, vent_id: str, description: SensorEntityDescription) -> None:
+        super().__init__(coordinator)
+        self.entity_description = description
+        self._entry_id = entry_id
+        self._vent_id = vent_id
+        self._attr_unique_id = f"{entry_id}_manual_{vent_id}_suggested"
+
+    @property
+    def name(self):
+        vent = (self.coordinator.data or {}).get("vents", {}).get(self._vent_id, {})
+        vent_name = vent.get("name") or f"Vent {self._vent_id}"
+        return f"{vent_name} {self.entity_description.name}"
+
+    @property
+    def device_info(self):
+        return self.coordinator.get_room_device_info_for_vent(self._vent_id)
+
+    @property
+    def native_value(self):
+        return self.coordinator.get_vent_target(self._vent_id)

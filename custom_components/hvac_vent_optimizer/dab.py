@@ -217,18 +217,41 @@ def adjust_for_minimum_airflow(
     calculated_percent_open: dict[str, float],
     additional_standard_vents: int,
     settings: DabSettings = DEFAULT_SETTINGS,
+    active_only: bool = True,
+    allow_inactive_if_needed: bool = True,
 ) -> dict[str, float]:
     total_device_count = additional_standard_vents if additional_standard_vents > 0 else 0
     sum_percentages = total_device_count * settings.standard_vent_default_open
+    active_ids: list[str] = []
+    inactive_ids: list[str] = []
 
-    for percent in calculated_percent_open.values():
+    for vent_id, state_val in rate_and_temp_per_vent_id.items():
+        active = bool(state_val.get("active", True))
+        if active:
+            active_ids.append(vent_id)
+        else:
+            inactive_ids.append(vent_id)
+
+    consider_ids = active_ids if active_only else list(calculated_percent_open.keys())
+
+    for vent_id in consider_ids:
         total_device_count += 1
-        sum_percentages += percent or 0
+        sum_percentages += calculated_percent_open.get(vent_id, 0) or 0
 
     if total_device_count <= 0:
-        return calculated_percent_open
+        if allow_inactive_if_needed and active_only and inactive_ids:
+            consider_ids = inactive_ids
+            total_device_count = len(consider_ids)
+            sum_percentages = sum(
+                calculated_percent_open.get(vent_id, 0) or 0 for vent_id in consider_ids
+            )
+        else:
+            return calculated_percent_open
 
-    temps = [float(v.get("temp", 0) or 0) for v in rate_and_temp_per_vent_id.values()]
+    temps = [
+        float(rate_and_temp_per_vent_id[vent_id].get("temp", 0) or 0)
+        for vent_id in consider_ids
+    ]
     if not temps:
         min_temp = 20.0
         max_temp = 25.0
@@ -244,25 +267,42 @@ def adjust_for_minimum_airflow(
     diff_percentage_sum = target_percent_sum - sum_percentages
 
     iterations = 0
-    while diff_percentage_sum > 0 and iterations < settings.max_iterations:
-        iterations += 1
-        for vent_id, state_val in rate_and_temp_per_vent_id.items():
-            percent_open_val = calculated_percent_open.get(vent_id, 0) or 0
-            if percent_open_val >= 100:
-                continue
+    def _increment(vent_ids: list[str], diff_sum: float) -> float:
+        nonlocal iterations
+        while diff_sum > 0 and iterations < settings.max_iterations:
+            iterations += 1
+            for vent_id in vent_ids:
+                state_val = rate_and_temp_per_vent_id.get(vent_id, {})
+                percent_open_val = calculated_percent_open.get(vent_id, 0) or 0
+                if percent_open_val >= 100:
+                    continue
 
-            if max_temp == min_temp:
-                proportion = 0
-            elif hvac_mode == "cooling":
-                proportion = (float(state_val.get("temp", 0) or 0) - min_temp) / (max_temp - min_temp)
-            else:
-                proportion = (max_temp - float(state_val.get("temp", 0) or 0)) / (max_temp - min_temp)
+                if max_temp == min_temp:
+                    proportion = 0
+                elif hvac_mode == "cooling":
+                    proportion = (float(state_val.get("temp", 0) or 0) - min_temp) / (
+                        max_temp - min_temp
+                    )
+                else:
+                    proportion = (max_temp - float(state_val.get("temp", 0) or 0)) / (
+                        max_temp - min_temp
+                    )
 
-            increment = settings.increment_percentage * proportion
-            percent_open_val += increment
-            calculated_percent_open[vent_id] = percent_open_val
-            diff_percentage_sum -= increment
-            if diff_percentage_sum <= 0:
-                break
+                increment = settings.increment_percentage * proportion
+                percent_open_val += increment
+                calculated_percent_open[vent_id] = percent_open_val
+                diff_sum -= increment
+                if diff_sum <= 0:
+                    break
+        return diff_sum
+
+    diff_percentage_sum = _increment(consider_ids, diff_percentage_sum)
+    if (
+        diff_percentage_sum > 0
+        and allow_inactive_if_needed
+        and active_only
+        and inactive_ids
+    ):
+        diff_percentage_sum = _increment(inactive_ids, diff_percentage_sum)
 
     return calculated_percent_open

@@ -1,4 +1,4 @@
-set_room_active:
+﻿set_room_active:
   name: Set room active
   description: Mark a room active or inactive (home/away) by room_id or vent_id.
   fields:
@@ -8,11 +8,11 @@ set_room_active:
       example: "abcd1234"
     room_id:
       name: Room ID
-      description: Flair room id to update.
+      description: Room id to update.
       example: "122133"
     vent_id:
       name: Vent ID
-      description: Flair vent id (room_id is resolved from this).
+      description: Vent id (room_id is resolved from this).
       example: "472379e6-8282-5911-390c-835c6d6e0f9e"
     active:
       name: Active
@@ -29,11 +29,11 @@ set_room_setpoint:
       example: "abcd1234"
     room_id:
       name: Room ID
-      description: Flair room id to update.
+      description: Room id to update.
       example: "122133"
     vent_id:
       name: Vent ID
-      description: Flair vent id (room_id is resolved from this).
+      description: Vent id (room_id is resolved from this).
       example: "472379e6-8282-5911-390c-835c6d6e0f9e"
     set_point_c:
       name: Setpoint (C)
@@ -72,7 +72,7 @@ run_dab:
 
 refresh_devices:
   name: Refresh devices
-  description: Force a data refresh from Flair.
+  description: Force a data refresh from the vendor API.
   fields:
     entry_id:
       name: Entry ID
@@ -90,7 +90,7 @@ export_efficiency:
     efficiency_path:
       name: Export file path
       description: Optional path under your HA config directory. If omitted, the payload is returned in the service response.
-      example: "smarter_flair_vents_efficiency_export.json"
+      example: "hvac_vent_optimizer_efficiency_export.json"
 
 import_efficiency:
   name: Import efficiency data
@@ -103,7 +103,7 @@ import_efficiency:
     efficiency_path:
       name: Import file path
       description: Optional path under your HA config directory (use this OR efficiency_payload).
-      example: "custom_components/smarter_flair_vents/eficiency_export.json"
+      example: "custom_components/hvac_vent_optimizer/eficiency_export.json"
     efficiency_payload:
       name: Import payload
       description: Optional inline JSON payload (use this OR efficiency_path).

@@ -1,8 +1,9 @@
-import asyncio
+﻿import asyncio
 from types import SimpleNamespace
 
-from smarter_flair_vents import config_flow
-from smarter_flair_vents.const import (
+from custom_components.hvac_vent_optimizer import config_flow
+from custom_components.hvac_vent_optimizer.const import (
+    BRAND_FLAIR,
     CONF_CLIENT_ID,
     CONF_CLIENT_SECRET,
     CONF_CLOSE_INACTIVE_ROOMS,
@@ -23,12 +24,16 @@ from smarter_flair_vents.const import (
     CONF_TEMP_SENSOR_ENTITY,
     CONF_THERMOSTAT_ENTITY,
     CONF_VENT_ASSIGNMENTS,
+    CONF_VENT_BRAND,
     CONF_VENT_GRANULARITY,
+    CONF_MANUAL_VENT_COUNT,
+    CONF_MANUAL_VENTS,
+    BRAND_MANUAL,
 )
 
 
 def _make_flow():
-    flow = config_flow.SmarterFlairVentsConfigFlow()
+    flow = config_flow.HvacVentOptimizerConfigFlow()
     flow.hass = SimpleNamespace()
     return flow
 
@@ -37,6 +42,7 @@ def _make_options_flow(options=None, data=None):
     entry = SimpleNamespace(
         data=data
         or {
+            CONF_VENT_BRAND: BRAND_FLAIR,
             CONF_CLIENT_ID: "id",
             CONF_CLIENT_SECRET: "secret",
             CONF_STRUCTURE_ID: "structure1",
@@ -45,7 +51,7 @@ def _make_options_flow(options=None, data=None):
         options=options or {},
     )
     entry.hass = SimpleNamespace()
-    return config_flow.SmarterFlairVentsOptionsFlow(entry)
+    return config_flow.HvacVentOptimizerOptionsFlow(entry)
 
 
 def test_async_step_user_shows_form_when_no_input(monkeypatch):
@@ -53,6 +59,31 @@ def test_async_step_user_shows_form_when_no_input(monkeypatch):
     result = asyncio.run(flow.async_step_user())
     assert result["type"] == "form"
     assert result["step_id"] == "user"
+
+
+def test_manual_flow_creates_entry():
+    flow = _make_flow()
+    result = asyncio.run(flow.async_step_user({CONF_VENT_BRAND: BRAND_MANUAL}))
+    assert result["type"] == "form"
+    assert result["step_id"] == "manual_count"
+
+    result2 = asyncio.run(flow.async_step_manual_count({CONF_MANUAL_VENT_COUNT: 1}))
+    assert result2["type"] == "form"
+    assert result2["step_id"] == "manual_vents"
+
+    result3 = asyncio.run(
+        flow.async_step_manual_vents(
+            {
+                "manual_1_name": "Office",
+                "manual_1_thermostat": "climate.main",
+                "manual_1_temp_sensor": "sensor.office_temp",
+            }
+        )
+    )
+    assert result3["type"] == "create_entry"
+    assert result3["data"][CONF_VENT_BRAND] == BRAND_MANUAL
+    assert result3["data"][CONF_MANUAL_VENT_COUNT] == 1
+    assert result3["data"][CONF_MANUAL_VENTS][0]["name"] == "Office"
 
 
 def test_async_step_user_auth_error(monkeypatch):
@@ -71,7 +102,7 @@ def test_async_step_user_auth_error(monkeypatch):
 
     flow = _make_flow()
     result = asyncio.run(
-        flow.async_step_user({CONF_CLIENT_ID: "id", CONF_CLIENT_SECRET: "secret"})
+        flow.async_step_flair_auth({CONF_CLIENT_ID: "id", CONF_CLIENT_SECRET: "secret"})
     )
     assert result["errors"]["base"] == "auth"
 
@@ -92,7 +123,7 @@ def test_async_step_user_cannot_connect(monkeypatch):
 
     flow = _make_flow()
     result = asyncio.run(
-        flow.async_step_user({CONF_CLIENT_ID: "id", CONF_CLIENT_SECRET: "secret"})
+        flow.async_step_flair_auth({CONF_CLIENT_ID: "id", CONF_CLIENT_SECRET: "secret"})
     )
     assert result["errors"]["base"] == "cannot_connect"
 
@@ -115,7 +146,7 @@ def test_async_step_user_invalid_scope(monkeypatch):
 
     flow = _make_flow()
     result = asyncio.run(
-        flow.async_step_user({CONF_CLIENT_ID: "id", CONF_CLIENT_SECRET: "secret"})
+        flow.async_step_flair_auth({CONF_CLIENT_ID: "id", CONF_CLIENT_SECRET: "secret"})
     )
     assert result["errors"]["base"] == "invalid_scope"
 
@@ -138,7 +169,7 @@ def test_async_step_user_invalid_client(monkeypatch):
 
     flow = _make_flow()
     result = asyncio.run(
-        flow.async_step_user({CONF_CLIENT_ID: "id", CONF_CLIENT_SECRET: "secret"})
+        flow.async_step_flair_auth({CONF_CLIENT_ID: "id", CONF_CLIENT_SECRET: "secret"})
     )
     assert result["errors"]["base"] == "invalid_client"
 
@@ -161,7 +192,7 @@ def test_async_step_user_invalid_grant(monkeypatch):
 
     flow = _make_flow()
     result = asyncio.run(
-        flow.async_step_user({CONF_CLIENT_ID: "id", CONF_CLIENT_SECRET: "secret"})
+        flow.async_step_flair_auth({CONF_CLIENT_ID: "id", CONF_CLIENT_SECRET: "secret"})
     )
     assert result["errors"]["base"] == "invalid_grant"
 
@@ -182,9 +213,39 @@ def test_async_step_user_rate_limited(monkeypatch):
 
     flow = _make_flow()
     result = asyncio.run(
-        flow.async_step_user({CONF_CLIENT_ID: "id", CONF_CLIENT_SECRET: "secret"})
+        flow.async_step_flair_auth({CONF_CLIENT_ID: "id", CONF_CLIENT_SECRET: "secret"})
     )
     assert result["errors"]["base"] == "rate_limited"
+
+
+def test_options_flow_brand_manual_updates_options():
+    options_flow = _make_options_flow(
+        options={},
+        data={
+            CONF_VENT_BRAND: BRAND_FLAIR,
+            CONF_CLIENT_ID: "id",
+            CONF_CLIENT_SECRET: "secret",
+            CONF_STRUCTURE_ID: "structure1",
+            CONF_STRUCTURE_NAME: "House",
+        },
+    )
+    result = asyncio.run(
+        options_flow.async_step_brand_manual(
+            {CONF_VENT_BRAND: BRAND_MANUAL, CONF_MANUAL_VENT_COUNT: 1}
+        )
+    )
+    assert result["type"] == "form"
+    result2 = asyncio.run(
+        options_flow.async_step_manual_vents(
+            {
+                "manual_1_name": "Den",
+                "manual_1_thermostat": "climate.main",
+                "manual_1_temp_sensor": "sensor.den_temp",
+            }
+        )
+    )
+    assert result2["type"] == "create_entry"
+    assert result2["data"][CONF_VENT_BRAND] == BRAND_MANUAL
 
 
 def test_async_step_user_timeout(monkeypatch):
@@ -203,7 +264,7 @@ def test_async_step_user_timeout(monkeypatch):
 
     flow = _make_flow()
     result = asyncio.run(
-        flow.async_step_user({CONF_CLIENT_ID: "id", CONF_CLIENT_SECRET: "secret"})
+        flow.async_step_flair_auth({CONF_CLIENT_ID: "id", CONF_CLIENT_SECRET: "secret"})
     )
     assert result["errors"]["base"] == "timeout"
 
@@ -224,7 +285,7 @@ def test_async_step_user_unknown_error(monkeypatch):
 
     flow = _make_flow()
     result = asyncio.run(
-        flow.async_step_user({CONF_CLIENT_ID: "id", CONF_CLIENT_SECRET: "secret"})
+        flow.async_step_flair_auth({CONF_CLIENT_ID: "id", CONF_CLIENT_SECRET: "secret"})
     )
     assert result["errors"]["base"] == "unknown"
 
@@ -245,7 +306,7 @@ def test_async_step_user_no_structures(monkeypatch):
 
     flow = _make_flow()
     result = asyncio.run(
-        flow.async_step_user({CONF_CLIENT_ID: "id", CONF_CLIENT_SECRET: "secret"})
+        flow.async_step_flair_auth({CONF_CLIENT_ID: "id", CONF_CLIENT_SECRET: "secret"})
     )
     assert result["errors"]["base"] == "no_structures"
 
@@ -266,7 +327,7 @@ def test_async_step_user_single_structure_creates_entry(monkeypatch):
 
     flow = _make_flow()
     result = asyncio.run(
-        flow.async_step_user({CONF_CLIENT_ID: "id", CONF_CLIENT_SECRET: "secret"})
+        flow.async_step_flair_auth({CONF_CLIENT_ID: "id", CONF_CLIENT_SECRET: "secret"})
     )
     assert result["type"] == "create_entry"
     assert result["data"][CONF_STRUCTURE_ID] == "s1"
@@ -289,7 +350,7 @@ def test_async_step_user_multi_structure_shows_structure_form(monkeypatch):
 
     flow = _make_flow()
     result = asyncio.run(
-        flow.async_step_user({CONF_CLIENT_ID: "id", CONF_CLIENT_SECRET: "secret"})
+        flow.async_step_flair_auth({CONF_CLIENT_ID: "id", CONF_CLIENT_SECRET: "secret"})
     )
     assert result["type"] == "form"
     assert result["step_id"] == "structure"
@@ -314,15 +375,16 @@ def test_async_step_structure_requires_structures():
 
 def test_options_flow_factory_returns_options_flow():
     entry = SimpleNamespace(data={}, options={})
-    flow = config_flow.SmarterFlairVentsConfigFlow()
+    flow = config_flow.HvacVentOptimizerConfigFlow()
     options_flow = flow.async_get_options_flow(entry)
-    assert isinstance(options_flow, config_flow.SmarterFlairVentsOptionsFlow)
+    assert isinstance(options_flow, config_flow.HvacVentOptimizerOptionsFlow)
 
 
 def test_options_flow_menu():
     options_flow = _make_options_flow()
     result = asyncio.run(options_flow.async_step_menu())
     assert result["type"] == "menu"
+    assert "brand_manual" in result["menu_options"]
     assert "algorithm_settings" in result["menu_options"]
 
 

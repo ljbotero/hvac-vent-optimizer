@@ -1,9 +1,9 @@
-import asyncio
+﻿import asyncio
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
-from smarter_flair_vents.coordinator import FlairCoordinator
-from smarter_flair_vents.const import (
+from custom_components.hvac_vent_optimizer.coordinator import FlairCoordinator
+from custom_components.hvac_vent_optimizer.const import (
     CONF_CLOSE_INACTIVE_ROOMS,
     CONF_CONTROL_STRATEGY,
     CONF_INITIAL_EFFICIENCY_PERCENT,
@@ -389,6 +389,78 @@ def test_inactive_room_can_reopen_for_airflow_safety():
         CONF_TEMP_ERROR_OVERRIDE: 0.6,
         CONF_VENT_GRANULARITY: 5,
         CONF_CLOSE_INACTIVE_ROOMS: True,
+    }
+    coord = _make_coordinator(
+        data={
+            "vents": {
+                "vent1": {
+                    "attributes": {"percent-open": 0},
+                    "room": {"attributes": {"current-temperature-c": 22.0, "active": False}},
+                }
+            }
+        },
+        options=options,
+        states={"climate.test": state},
+        api=api,
+    )
+    coord._vent_rates = {"vent1": {"heating": 0.3}}
+    asyncio.run(
+        coord._async_apply_dab_adjustments("climate.test", "heating", ["vent1"], coord.data)
+    )
+    assert api.vent_calls
+
+
+def test_inactive_room_not_adjusted_when_close_inactive_false():
+    api = _FakeApi()
+    state = _FakeState(
+        "heat",
+        {"target_temp_low": 72},
+        entity_id="climate.test",
+    )
+    options = {
+        CONF_VENT_ASSIGNMENTS: {"vent1": {CONF_THERMOSTAT_ENTITY: "climate.test"}},
+        CONF_CONTROL_STRATEGY: "cost",
+        CONF_MIN_ADJUSTMENT_PERCENT: 0,
+        CONF_MIN_ADJUSTMENT_INTERVAL: 0,
+        CONF_TEMP_ERROR_OVERRIDE: 0.6,
+        CONF_VENT_GRANULARITY: 5,
+        CONF_CLOSE_INACTIVE_ROOMS: False,
+    }
+    coord = _make_coordinator(
+        data={
+            "vents": {
+                "vent1": {
+                    "attributes": {"percent-open": 50},
+                    "room": {"attributes": {"current-temperature-c": 22.0, "active": False}},
+                }
+            }
+        },
+        options=options,
+        states={"climate.test": state},
+        api=api,
+    )
+    coord._vent_rates = {"vent1": {"heating": 0.5}}
+    asyncio.run(
+        coord._async_apply_dab_adjustments("climate.test", "heating", ["vent1"], coord.data)
+    )
+    assert api.vent_calls == []
+
+
+def test_inactive_room_can_open_for_safety_when_close_inactive_false():
+    api = _FakeApi()
+    state = _FakeState(
+        "heat",
+        {"target_temp_low": 72},
+        entity_id="climate.test",
+    )
+    options = {
+        CONF_VENT_ASSIGNMENTS: {"vent1": {CONF_THERMOSTAT_ENTITY: "climate.test"}},
+        CONF_CONTROL_STRATEGY: "cost",
+        CONF_MIN_ADJUSTMENT_PERCENT: 0,
+        CONF_MIN_ADJUSTMENT_INTERVAL: 0,
+        CONF_TEMP_ERROR_OVERRIDE: 0.6,
+        CONF_VENT_GRANULARITY: 5,
+        CONF_CLOSE_INACTIVE_ROOMS: False,
     }
     coord = _make_coordinator(
         data={

@@ -1,8 +1,10 @@
 import asyncio
 from types import SimpleNamespace
 
-from smarter_flair_vents import services
-from smarter_flair_vents.const import DOMAIN
+import pytest
+
+from custom_components.hvac_vent_optimizer import services
+from custom_components.hvac_vent_optimizer.const import DOMAIN
 
 
 class _FakeApi:
@@ -48,6 +50,14 @@ class _FakeCoordinator:
     def resolve_room_id_from_vent(self, vent_id):
         return "room-from-vent"
 
+    def is_manual_brand(self):
+        return False
+
+
+class _ManualCoordinator(_FakeCoordinator):
+    def is_manual_brand(self):
+        return True
+
 
 class _FakeServices:
     def __init__(self):
@@ -75,6 +85,20 @@ class _FakeHass:
 
     async def async_add_executor_job(self, func, *args, **kwargs):
         return func(*args, **kwargs)
+
+
+class _FakeConfig:
+    def __init__(self, allowed=True):
+        self._allowed = allowed
+
+    def path(self, *parts):
+        base = "C:\\config"
+        if not parts:
+            return base
+        return base + "\\" + "\\".join(parts)
+
+    def is_allowed_path(self, path):
+        return self._allowed
 
 
 class _ServiceCall:
@@ -178,3 +202,99 @@ def test_validate_room_or_vent():
     except Exception as exc:
         assert "room_id or vent_id" in str(exc)
     assert services._validate_room_or_vent({"room_id": "r1"}) == {"room_id": "r1"}
+
+
+def test_services_blocked_in_manual_mode():
+    coordinator = _ManualCoordinator()
+    hass = _FakeHass(coordinator)
+    services.FlairCoordinator = _ManualCoordinator
+    asyncio.run(services.async_register_services(hass))
+
+    with pytest.raises(ValueError):
+        asyncio.run(hass.services.registry[(DOMAIN, "set_room_active")](_ServiceCall({"room_id": "room1"})))
+    with pytest.raises(ValueError):
+        asyncio.run(hass.services.registry[(DOMAIN, "set_room_setpoint")](_ServiceCall({"room_id": "room1", "set_point_c": 22.0})))
+    with pytest.raises(ValueError):
+        asyncio.run(hass.services.registry[(DOMAIN, "set_structure_mode")](_ServiceCall({"structure_mode": "manual"})))
+    with pytest.raises(ValueError):
+        asyncio.run(hass.services.registry[(DOMAIN, "refresh_devices")](_ServiceCall({})))
+
+
+def test_resolve_efficiency_path_allows_inside_config():
+    hass = SimpleNamespace(config=_FakeConfig())
+    path = services._resolve_efficiency_path(hass, "eff.json", "default.json")
+    assert path.endswith("config\\eff.json")
+
+
+def test_resolve_efficiency_path_blocks_external():
+    hass = SimpleNamespace(config=_FakeConfig(allowed=False))
+    with pytest.raises(ValueError):
+        services._resolve_efficiency_path(hass, "C:/tmp/eff.json", "default.json")
+
+
+def test_get_coordinator_lookup():
+    services.FlairCoordinator = _FakeCoordinator
+    c1 = _FakeCoordinator(entry_id="entry1")
+    c2 = _FakeCoordinator(entry_id="entry2")
+    hass = SimpleNamespace(data={DOMAIN: {"entry1": c1, "entry2": c2}})
+    assert services._get_coordinator(hass, "entry1") == c1
+    assert services._get_coordinator(hass, "missing") is None
+    # multiple entries, no entry_id
+    assert services._get_coordinator(hass, None) is None
+
+    hass_single = SimpleNamespace(data={DOMAIN: {"entry1": c1}})
+    assert services._get_coordinator(hass_single, None) == c1
+
+
+def test_service_export_efficiency_handles_errors():
+    coordinator = _FakeCoordinator()
+    hass = _FakeHass(coordinator)
+    services.FlairCoordinator = _FakeCoordinator
+    asyncio.run(services.async_register_services(hass))
+
+    notifications = []
+    original_notify = services.persistent_notification.async_create
+    original_resolve = services._resolve_efficiency_path
+    services.persistent_notification.async_create = (
+        lambda hass_obj, msg, title=None: notifications.append((msg, title))
+    )
+    services._resolve_efficiency_path = lambda *args, **kwargs: (_ for _ in ()).throw(ValueError("bad path"))
+
+    call = _ServiceCall({"efficiency_path": "../bad.json"})
+    result = asyncio.run(hass.services.registry[(DOMAIN, "export_efficiency")](call))
+    assert "error" in result
+    assert notifications
+    services.persistent_notification.async_create = original_notify
+    services._resolve_efficiency_path = original_resolve
+
+
+def test_service_import_efficiency_missing_file_notifies():
+    coordinator = _FakeCoordinator()
+    hass = _FakeHass(coordinator)
+    services.FlairCoordinator = _FakeCoordinator
+    asyncio.run(services.async_register_services(hass))
+
+    notifications = []
+    original_notify = services.persistent_notification.async_create
+    services.persistent_notification.async_create = (
+        lambda hass_obj, msg, title=None: notifications.append((msg, title))
+    )
+    original_exists = services.os.path.exists
+    services.os.path.exists = lambda path: False
+
+    call = _ServiceCall({"efficiency_path": "missing.json"})
+    asyncio.run(hass.services.registry[(DOMAIN, "import_efficiency")](call))
+    assert notifications
+    services.persistent_notification.async_create = original_notify
+    services.os.path.exists = original_exists
+
+
+def test_service_set_structure_mode_missing_structure_id():
+    coordinator = _FakeCoordinator(structure_id=None)
+    hass = _FakeHass(coordinator)
+    services.FlairCoordinator = _FakeCoordinator
+    asyncio.run(services.async_register_services(hass))
+
+    call = _ServiceCall({"structure_mode": "manual"})
+    asyncio.run(hass.services.registry[(DOMAIN, "set_structure_mode")](call))
+    assert coordinator.api.calls == []

@@ -1,4 +1,4 @@
-from utils import get_remote_sensor_id
+from custom_components.hvac_vent_optimizer.utils import get_remote_sensor_id
 
 
 def test_get_remote_sensor_id_from_list():

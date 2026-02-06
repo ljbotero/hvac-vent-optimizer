@@ -1,4 +1,4 @@
-"""Test configuration for Smarter Flair Vents."""
+﻿"""Test configuration for HVAC Vent Optimizer."""
 import os
 import sys
 from dataclasses import dataclass
@@ -35,7 +35,7 @@ def pytest_fixture_setup(fixturedef, request):
 
 # Ensure we can import local modules like dab.py without importing Home Assistant.
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-# Allow package-style imports (smarter_flair_vents.*) for modules that use relative imports.
+# Allow package-style imports (hvac_vent_optimizer.*) for modules that use relative imports.
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 # Provide minimal Home Assistant mocks so package imports don't fail.

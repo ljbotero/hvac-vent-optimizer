@@ -11,6 +11,8 @@ from .const import DOMAIN
 
 async def async_setup_entry(hass, entry, async_add_entities):
     coordinator = hass.data[DOMAIN][entry.entry_id]
+    if coordinator.is_manual_brand():
+        return
     rooms: dict[str, dict] = {}
 
     for vent in (coordinator.data or {}).get("vents", {}).values():

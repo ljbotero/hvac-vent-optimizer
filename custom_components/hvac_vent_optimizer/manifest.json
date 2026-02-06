@@ -1,6 +1,6 @@
 {
-  "domain": "smarter_flair_vents",
-  "name": "Smarter Flair Vents",
+  "domain": "hvac_vent_optimizer",
+  "name": "HVAC Vent Optimizer",
   "documentation": "https://github.com/ljbotero/smarter-flair-vents",
   "issue_tracker": "https://github.com/ljbotero/smarter-flair-vents/issues",
   "requirements": [],

@@ -1,7 +1,14 @@
-"""Constants for Smarter Flair Vents integration."""
+﻿"""Constants for HVAC Vent Optimizer integration."""
 from __future__ import annotations
 
-DOMAIN = "smarter_flair_vents"
+DOMAIN = "hvac_vent_optimizer"
+
+CONF_VENT_BRAND = "vent_brand"
+CONF_MANUAL_VENT_COUNT = "manual_vent_count"
+CONF_MANUAL_VENTS = "manual_vents"
+
+BRAND_FLAIR = "flair"
+BRAND_MANUAL = "manual"
 
 CONF_CLIENT_ID = "client_id"
 CONF_CLIENT_SECRET = "client_secret"
@@ -50,6 +57,8 @@ DEFAULT_VENT_GRANULARITY = 5
 DEFAULT_POLL_INTERVAL_ACTIVE = 3
 DEFAULT_POLL_INTERVAL_IDLE = 10
 DEFAULT_CONVENTIONAL_VENTS = 0
+MAX_CONVENTIONAL_VENTS = 50
+DEFAULT_MANUAL_VENT_COUNT = 1
 DEFAULT_DAB_FORCE_MANUAL = True
 DEFAULT_INITIAL_EFFICIENCY_PERCENT = 50
 DEFAULT_NOTIFY_EFFICIENCY_CHANGES = True
@@ -59,4 +68,4 @@ DEFAULT_MIN_ADJUSTMENT_PERCENT = 10
 DEFAULT_MIN_ADJUSTMENT_INTERVAL = 30
 DEFAULT_TEMP_ERROR_OVERRIDE = 0.6
 
-PLATFORMS: list[str] = ["cover", "sensor", "binary_sensor", "switch", "climate"]
+PLATFORMS: list[str] = ["cover", "sensor", "binary_sensor", "switch", "climate", "number"]

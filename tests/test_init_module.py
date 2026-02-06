@@ -1,7 +1,7 @@
-import asyncio
+﻿import asyncio
 from types import SimpleNamespace
 
-import smarter_flair_vents as integration
+import custom_components.hvac_vent_optimizer as integration
 
 
 class _FakeConfigEntries:
@@ -55,7 +55,8 @@ class _FakeCoordinator:
 
 class _FakeEntry:
     def __init__(self):
-        self.data = {"client_id": "id", "client_secret": "secret"}
+        self.data = {"client_id": "id", "client_secret": "secret", "vent_brand": "flair"}
+        self.options = {}
         self.entry_id = "entry1"
         self.title = "title"
 

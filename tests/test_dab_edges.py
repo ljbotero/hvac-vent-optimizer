@@ -1,6 +1,6 @@
 import pytest
 
-from dab import (
+from custom_components.hvac_vent_optimizer.dab import (
     adjust_for_minimum_airflow,
     calculate_longest_minutes_to_target,
     calculate_open_percentage_for_all_vents,
@@ -30,7 +30,7 @@ def test_longest_minutes_with_zero_rate():
     rate_and_temp = {
         "vent1": {"rate": 0.0, "temp": 24.0, "active": True, "name": "A"},
     }
-    assert calculate_longest_minutes_to_target(rate_and_temp, "cooling", 22.0, 60) == pytest.approx(0.0)
+    assert calculate_longest_minutes_to_target(rate_and_temp, "cooling", 22.0, 60) == pytest.approx(-1.0)
 
 
 def test_adjust_for_minimum_airflow_default_temps():
