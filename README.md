@@ -6,7 +6,7 @@ via the UI config flow and options flow.
 
 ### HACS custom repository (recommended)
 1) HACS -> Settings -> Custom repositories -> Add
-2) Repository: https://github.com/ljbotero/smarter-flair-vents
+2) Repository: https://github.com/ljbotero/hvac-vent-optimizer
 3) Category: Integration
 4) Install and restart Home Assistant
 
