@@ -1,16 +1,16 @@
 {
   "domain": "hvac_vent_optimizer",
   "name": "HVAC Vent Optimizer",
-  "documentation": "https://github.com/ljbotero/hvac-vent-optimizer",
-  "issue_tracker": "https://github.com/ljbotero/hvac-vent-optimizer/issues",
-  "dependencies": [
-    "logbook"
-  ],
-  "requirements": [],
   "codeowners": [
     "@ljbotero"
   ],
-  "version": "0.1.0",
   "config_flow": true,
-  "iot_class": "cloud_polling"
+  "dependencies": [
+    "logbook"
+  ],
+  "documentation": "https://github.com/ljbotero/hvac-vent-optimizer",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/ljbotero/hvac-vent-optimizer/issues",
+  "requirements": [],
+  "version": "0.1.0"
 }
