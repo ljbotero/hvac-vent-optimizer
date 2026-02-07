@@ -53,7 +53,7 @@
     "step": {
       "menu": {
         "title": "HVAC Vent Optimizer options",
-        "description": "Choose which settings to configure. Start with brand selection, then DAB & polling.\n\nSupport the project: https://github.com/sponsors/ljbotero"
+        "description": "Choose which settings to configure. Start with brand selection, then DAB & polling."
       },
       "algorithm_settings": {
         "title": "Algorithm & polling",

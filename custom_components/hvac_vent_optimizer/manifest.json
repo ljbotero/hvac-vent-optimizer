@@ -3,6 +3,9 @@
   "name": "HVAC Vent Optimizer",
   "documentation": "https://github.com/ljbotero/hvac-vent-optimizer",
   "issue_tracker": "https://github.com/ljbotero/hvac-vent-optimizer/issues",
+  "dependencies": [
+    "logbook"
+  ],
   "requirements": [],
   "codeowners": [
     "@ljbotero"
