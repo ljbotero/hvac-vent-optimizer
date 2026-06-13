@@ -86,24 +86,24 @@ def test_calculate_vent_open_percentage_values():
 
 def test_calculate_open_percentage_for_all_vents():
     rate_and_temp = {
-        "1222bc5e": {"rate": 0.123, "temp": 26.444, "active": True},
-        "00f65b12": {"rate": 0.070, "temp": 25.784, "active": True},
-        "d3f411b2": {"rate": 0.035, "temp": 26.277, "active": True},
-        "472379e6": {"rate": 0.318, "temp": 24.892, "active": True},
-        "6ee4c352": {"rate": 0.318, "temp": 24.892, "active": True},
-        "c5e770b6": {"rate": 0.009, "temp": 23.666, "active": True},
-        "e522531c": {"rate": 0.061, "temp": 25.444, "active": False},
-        "acb0b95d": {"rate": 0.432, "temp": 25.944, "active": True},
+        "ventid5": {"rate": 0.123, "temp": 26.444, "active": True},
+        "ventid8": {"rate": 0.070, "temp": 25.784, "active": True},
+        "ventid3": {"rate": 0.035, "temp": 26.277, "active": True},
+        "ventid1": {"rate": 0.318, "temp": 24.892, "active": True},
+        "ventid2": {"rate": 0.318, "temp": 24.892, "active": True},
+        "ventid6": {"rate": 0.009, "temp": 23.666, "active": True},
+        "ventid7": {"rate": 0.061, "temp": 25.444, "active": False},
+        "ventid4": {"rate": 0.432, "temp": 25.944, "active": True},
     }
     expected = {
-        "1222bc5e": 23.554,
-        "00f65b12": 31.608,
-        "d3f411b2": 100.0,
-        "472379e6": 11.488,
-        "6ee4c352": 11.488,
-        "c5e770b6": 0.0,
-        "e522531c": 0.0,
-        "acb0b95d": 12.130,
+        "ventid5": 23.554,
+        "ventid8": 31.608,
+        "ventid3": 100.0,
+        "ventid1": 11.488,
+        "ventid2": 11.488,
+        "ventid6": 0.0,
+        "ventid7": 0.0,
+        "ventid4": 12.130,
     }
     result = calculate_open_percentage_for_all_vents(rate_and_temp, "cooling", 23.666, 60)
     for key, val in expected.items():
@@ -112,14 +112,14 @@ def test_calculate_open_percentage_for_all_vents():
 
 def test_calculate_longest_minutes_to_target():
     rate_and_temp = {
-        "1222bc5e": {"rate": 0.123, "temp": 26.444, "active": True, "name": "1"},
-        "00f65b12": {"rate": 0.070, "temp": 25.784, "active": True, "name": "2"},
-        "d3f411b2": {"rate": 0.035, "temp": 26.277, "active": True, "name": "3"},
-        "472379e6": {"rate": 0.318, "temp": 24.892, "active": True, "name": "4"},
-        "6ee4c352": {"rate": 0.318, "temp": 24.892, "active": True, "name": "5"},
-        "c5e770b6": {"rate": 0.009, "temp": 23.666, "active": True, "name": "6"},
-        "e522531c": {"rate": 0.061, "temp": 25.444, "active": False, "name": "7"},
-        "acb0b95d": {"rate": 0.432, "temp": 25.944, "active": True, "name": "8"},
+        "ventid5": {"rate": 0.123, "temp": 26.444, "active": True, "name": "1"},
+        "ventid8": {"rate": 0.070, "temp": 25.784, "active": True, "name": "2"},
+        "ventid3": {"rate": 0.035, "temp": 26.277, "active": True, "name": "3"},
+        "ventid1": {"rate": 0.318, "temp": 24.892, "active": True, "name": "4"},
+        "ventid2": {"rate": 0.318, "temp": 24.892, "active": True, "name": "5"},
+        "ventid6": {"rate": 0.009, "temp": 23.666, "active": True, "name": "6"},
+        "ventid7": {"rate": 0.061, "temp": 25.444, "active": False, "name": "7"},
+        "ventid4": {"rate": 0.432, "temp": 25.944, "active": True, "name": "8"},
     }
     assert calculate_longest_minutes_to_target(rate_and_temp, "cooling", 23.666, 72) == pytest.approx(72)
 

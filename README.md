@@ -37,10 +37,10 @@ Example Lovelace table (adjust entity_ids to match your vents):
 type: entities
 title: Vent Efficiency
 entities:
-  - entity: sensor.tomas_1222_cooling_efficiency
-    name: Tomas Cooling
-  - entity: sensor.tomas_1222_heating_efficiency
-    name: Tomas Heating
+  - entity: sensor.bedroom_3_cooling_efficiency
+    name: Bedroom 3 Cooling
+  - entity: sensor.bedroom_3_heating_efficiency
+    name: Bedroom 3 Heating
   - entity: sensor.master_bedroom_cooling_efficiency
     name: Master Bedroom Cooling
   - entity: sensor.master_bedroom_heating_efficiency
