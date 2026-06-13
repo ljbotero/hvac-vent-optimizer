@@ -3,7 +3,7 @@
 These exercise the *real* coordinator apply path
 (``_apply_dab_adjustments_impl``) through the Home Assistant fakes installed by
 ``conftest.py``. They lock in the Requirement 23 behavior for a room served by
-two smart vents (the Master Bedroom ``4723`` + ``6ee4`` pair from the recorder
+two smart vents (the Master Bedroom ``vent_a`` + ``vent_b`` pair from the recorder
 analysis, which drifted to 53-vs-51 moves over 7 days):
 
 * R23.1/R23.3/R23.5 — both vents in a room always receive the *identical*
@@ -138,8 +138,8 @@ def _count_calls(api, vent_id):
 
 
 # Master Bedroom's two physical vents from the recorder analysis.
-M1 = "4723"
-M2 = "6ee4"
+M1 = "vent_a"
+M2 = "vent_b"
 
 
 # ---------------------------------------------------------------------------
@@ -179,7 +179,7 @@ def test_master_room_vents_do_not_diverge_via_deadband():
             {"id": M1, "room": "Master", "temp": 22.0, "active": True, "open": 10, "eff": 0.4},
             {"id": M2, "room": "Master", "temp": 22.0, "active": True, "open": 40, "eff": 0.4},
             # Hot bottleneck absorbs the airflow floor so Master stays at 0.
-            {"id": "hot", "room": "Mariana", "temp": 27.9, "active": True, "open": 0, "eff": 0.017},
+            {"id": "hot", "room": "Bedroom 2", "temp": 27.9, "active": True, "open": 0, "eff": 0.017},
         ]
     )
     _run(coord, thermostat, data)
@@ -198,8 +198,8 @@ def test_master_room_vents_do_not_diverge_via_deadband():
 def test_group_shares_one_cooldown_clock_even_when_one_vent_already_correct():
     """Commanding the group resets cooldown for every vent in it (R23.2).
 
-    ``4723`` already sits at the group target (100) so it is not physically
-    re-commanded, but ``6ee4`` moves. The group's command must stamp the shared
+    ``vent_a`` already sits at the group target (100) so it is not physically
+    re-commanded, but ``vent_b`` moves. The group's command must stamp the shared
     cooldown clock onto BOTH vents so the next poll holds the whole room.
     """
     coord, api, thermostat, data = _build(
@@ -211,7 +211,7 @@ def test_group_shares_one_cooldown_clock_even_when_one_vent_already_correct():
     )
     _run(coord, thermostat, data)
 
-    # Only 6ee4 physically moved; 4723 was already at 100.
+    # Only vent_b physically moved; vent_a was already at 100.
     calls = _calls(api)
     assert calls.get(M2) == 100
     assert M1 not in calls, "the vent already at target should not be re-commanded"

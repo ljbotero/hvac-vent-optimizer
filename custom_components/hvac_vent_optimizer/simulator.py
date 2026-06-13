@@ -722,7 +722,7 @@ def compare(
 # Built-in demo scenario + minimal CLI
 # ---------------------------------------------------------------------------
 def default_scenario() -> Scenario:
-    """A representative cooling scenario (the documented Mariana-pinned case).
+    """A representative cooling scenario (the documented Bedroom 2-pinned case).
 
     Seeds each vent with a representative **saturating** curve (R25.12) so the
     closed loop reflects real aperture→airflow saturation rather than a linear
@@ -730,9 +730,9 @@ def default_scenario() -> Scenario:
     """
     leak = 0.1
     rooms = [
-        RoomScenario("mariana", 27.5, 0.017, leak, curve=representative_saturating_curve(leak)),
-        RoomScenario("tomas", 27.0, 0.020, leak, curve=representative_saturating_curve(leak)),
-        RoomScenario("matias", 26.6, 0.072, leak, curve=representative_saturating_curve(leak)),
+        RoomScenario("bedroom_2", 27.5, 0.017, leak, curve=representative_saturating_curve(leak)),
+        RoomScenario("bedroom_3", 27.0, 0.020, leak, curve=representative_saturating_curve(leak)),
+        RoomScenario("bedroom_1", 26.6, 0.072, leak, curve=representative_saturating_curve(leak)),
         RoomScenario(
             "master",
             26.7,

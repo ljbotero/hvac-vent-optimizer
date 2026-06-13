@@ -269,19 +269,19 @@ class TestLinearFallback:
         assert result.targets["Solo"] == pytest.approx(100.0, abs=1.0)
         assert "Solo" in result.airflow_limited
 
-    def test_curve_none_matches_worked_example_tomas(self):
+    def test_curve_none_matches_worked_example_bedroom_3(self):
         # The Task 9 worked example (linear leak 0.1) must still hold with the
         # optional curve field absent.
         data = {
-            "Mariana": (27.9, 0.017),
-            "Tomas": (27.7, 0.020),
+            "Bedroom 2": (27.9, 0.017),
+            "Bedroom 3": (27.7, 0.020),
             "Guest": (27.0, 0.033),
             "Bathroom": (25.7, 0.438),
         }
         rooms = [_room(rid, t, e, curve=None) for rid, (t, e) in data.items()]
         result = balance.allocate(rooms, SETPOINT_C, MODE, _settings())
-        assert result.targets["Mariana"] == pytest.approx(100.0, abs=1.0)
-        assert result.targets["Tomas"] == pytest.approx(73.0, abs=1.5)
+        assert result.targets["Bedroom 2"] == pytest.approx(100.0, abs=1.0)
+        assert result.targets["Bedroom 3"] == pytest.approx(73.0, abs=1.5)
         assert result.targets["Bathroom"] == 0.0
 
 

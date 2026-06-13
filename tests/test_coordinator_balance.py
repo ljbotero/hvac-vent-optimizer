@@ -118,11 +118,11 @@ def _calls(api):
 # ---------------------------------------------------------------------------
 def test_balance_hot_low_efficiency_room_gets_more_open_than_satisfied():
     # Cooling, thermostat target 24.0 (effective setpoint ~23.3 after offset).
-    # Mariana-like: hot (27.9) and low efficiency (0.017) -> bottleneck.
+    # Bedroom 2-like: hot (27.9) and low efficiency (0.017) -> bottleneck.
     # Bathroom-like: overcooled (22.0) -> satisfied -> 0 %.
     coord, api, thermostat, data = _build(
         [
-            {"id": "hot", "name": "Mariana", "temp": 27.9, "active": True, "open": 0, "eff": 0.017},
+            {"id": "hot", "name": "Bedroom 2", "temp": 27.9, "active": True, "open": 0, "eff": 0.017},
             {"id": "cold", "name": "Bathroom", "temp": 22.0, "active": True, "open": 0, "eff": 0.438},
         ]
     )
@@ -139,8 +139,8 @@ def test_balance_hot_low_efficiency_room_gets_more_open_than_satisfied():
 def test_balance_bottleneck_saturates_at_full_open():
     coord, api, thermostat, data = _build(
         [
-            {"id": "hot", "name": "Mariana", "temp": 27.9, "active": True, "open": 0, "eff": 0.017},
-            {"id": "warm", "name": "Tomas", "temp": 24.2, "active": True, "open": 0, "eff": 0.5},
+            {"id": "hot", "name": "Bedroom 2", "temp": 27.9, "active": True, "open": 0, "eff": 0.017},
+            {"id": "warm", "name": "Bedroom 3", "temp": 24.2, "active": True, "open": 0, "eff": 0.5},
         ]
     )
     _run(coord, thermostat, data)
@@ -165,7 +165,7 @@ def test_balance_routes_through_apply_safety_floor(monkeypatch):
 
     coord, _api, thermostat, data = _build(
         [
-            {"id": "hot", "name": "Mariana", "temp": 27.9, "active": True, "open": 0, "eff": 0.017},
+            {"id": "hot", "name": "Bedroom 2", "temp": 27.9, "active": True, "open": 0, "eff": 0.017},
             {"id": "cold", "name": "Bathroom", "temp": 22.0, "active": True, "open": 0, "eff": 0.438},
         ]
     )
@@ -178,7 +178,7 @@ def test_balance_floor_padding_reaches_dispatch():
     # below leak (-> 0 from allocation). Combined ~ (100+0+0+0+0)/5 = 20 % < 40 %
     # floor, so apply_safety_floor must pad warm rooms and at least one of those
     # opens must reach the dispatch path.
-    rooms = [{"id": "hot", "name": "Mariana", "temp": 27.9, "active": True, "open": 0, "eff": 0.017}]
+    rooms = [{"id": "hot", "name": "Bedroom 2", "temp": 27.9, "active": True, "open": 0, "eff": 0.017}]
     warm_ids = []
     for i in range(4):
         wid = f"warm{i}"
@@ -200,7 +200,7 @@ def test_balance_floor_padding_reaches_dispatch():
 def test_balance_inactive_room_held_when_close_inactive_disabled():
     coord, api, thermostat, data = _build(
         [
-            {"id": "hot", "name": "Mariana", "temp": 27.9, "active": True, "open": 0, "eff": 0.017},
+            {"id": "hot", "name": "Bedroom 2", "temp": 27.9, "active": True, "open": 0, "eff": 0.017},
             {"id": "guest", "name": "Guest", "temp": 26.0, "active": False, "open": 60, "eff": 0.2},
         ],
         close_inactive=False,
@@ -216,7 +216,7 @@ def test_balance_inactive_room_held_when_close_inactive_disabled():
 def test_balance_close_inactive_rooms_honored():
     coord, api, thermostat, data = _build(
         [
-            {"id": "hot", "name": "Mariana", "temp": 27.9, "active": True, "open": 0, "eff": 0.017},
+            {"id": "hot", "name": "Bedroom 2", "temp": 27.9, "active": True, "open": 0, "eff": 0.017},
             {"id": "guest", "name": "Guest", "temp": 26.0, "active": False, "open": 60, "eff": 0.2},
         ],
         close_inactive=True,
@@ -232,7 +232,7 @@ def test_balance_close_inactive_rooms_honored():
 def test_balance_missing_room_temp_skipped_gracefully():
     coord, api, thermostat, data = _build(
         [
-            {"id": "hot", "name": "Mariana", "temp": 27.9, "active": True, "open": 0, "eff": 0.017},
+            {"id": "hot", "name": "Bedroom 2", "temp": 27.9, "active": True, "open": 0, "eff": 0.017},
             # No room temp and no temp sensor -> unresolvable temperature.
             {"id": "ghost", "name": "Ghost", "temp": None, "active": True, "open": 0, "eff": 0.2},
         ]
@@ -318,8 +318,8 @@ def test_balance_gather_passes_ventcurve_on_room_alloc_input(monkeypatch):
 
     coord, _api, thermostat, data = _build(
         [
-            {"id": "hot", "name": "Mariana", "temp": 27.9, "active": True, "open": 0, "eff": 0.017},
-            {"id": "warm", "name": "Tomas", "temp": 26.5, "active": True, "open": 0, "eff": 0.05},
+            {"id": "hot", "name": "Bedroom 2", "temp": 27.9, "active": True, "open": 0, "eff": 0.017},
+            {"id": "warm", "name": "Bedroom 3", "temp": 26.5, "active": True, "open": 0, "eff": 0.05},
         ]
     )
     _run(coord, thermostat, data)
@@ -336,7 +336,7 @@ def test_balance_seeded_saturating_curve_drives_bottleneck_to_knee():
     # coordinator must command it at its knee (~50 %), NOT 100 % — opening past
     # the knee is wasted airflow.
     coord, api, thermostat, data = _build(
-        [{"id": "hot", "name": "Mariana", "temp": 27.9, "active": True, "open": 0, "eff": 0.017}]
+        [{"id": "hot", "name": "Bedroom 2", "temp": 27.9, "active": True, "open": 0, "eff": 0.017}]
     )
     _seed_saturating_curve(coord, "hot")
     _run(coord, thermostat, data)
@@ -348,7 +348,7 @@ def test_get_vent_curve_falls_back_to_near_linear_when_unseeded():
     # No vent_effectiveness and no regression → a near-linear seed curve whose
     # knee is 100 % (so behavior matches the scalar-leak model it supersedes).
     coord, _api, thermostat, data = _build(
-        [{"id": "hot", "name": "Mariana", "temp": 27.9, "active": True, "open": 0, "eff": 0.017}]
+        [{"id": "hot", "name": "Bedroom 2", "temp": 27.9, "active": True, "open": 0, "eff": 0.017}]
     )
     from homeassistant.components.climate.const import HVACAction
 

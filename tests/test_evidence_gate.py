@@ -2,7 +2,7 @@
 
 This is the **ship gate** that decides whether ``balance`` may become the
 default strategy (Task 27 / R17.1). It builds canned, deterministic scenarios
-that are faithful to the documented data analysis — the *Mariana-pinned* case
+that are faithful to the documented data analysis — the *Bedroom 2-pinned* case
 (design worked example A1b), the *Bathroom-overcooled* case, and a *mixed*
 full-house case — and runs the offline closed-loop simulator (R15) to compare
 ``balance`` against ``dab`` on the **same** scenario.
@@ -74,11 +74,11 @@ simulator = _load("simulator")
 # ---------------------------------------------------------------------------
 # Learned cooling efficiencies from the data analysis (°C/min at full flow).
 EFF = {
-    "mariana": 0.017,  # slow bottleneck
-    "tomas": 0.020,
+    "bedroom_2": 0.017,  # slow bottleneck
+    "bedroom_3": 0.020,
     "guest": 0.033,
     "master": 0.053,  # two vents (R23)
-    "matias": 0.072,
+    "bedroom_1": 0.072,
     "bathroom": 0.438,  # very fast → overcools
 }
 LEAK = 0.1
@@ -119,15 +119,15 @@ def _room(room_id: str, temp_c: float, drift: float = 0.0):
     )
 
 
-def scenario_mariana_pinned():
-    """Design worked example A1b: Mariana hot + slow, Bathroom pre-overcooled."""
+def scenario_bedroom_2_pinned():
+    """Design worked example A1b: Bedroom 2 hot + slow, Bathroom pre-overcooled."""
     return simulator.Scenario(
         rooms=[
-            _room("mariana", 27.9),
-            _room("tomas", 27.7),
+            _room("bedroom_2", 27.9),
+            _room("bedroom_3", 27.7),
             _room("guest", 27.0),
             _room("master", 26.4),
-            _room("matias", 26.6),
+            _room("bedroom_1", 26.6),
             _room("bathroom", 25.7),
         ],
         setpoint_c=SETPOINT_C,
@@ -142,8 +142,8 @@ def scenario_bathroom_overcooled():
     """The fast Bathroom sits below setpoint while the slow rooms run hot."""
     return simulator.Scenario(
         rooms=[
-            _room("mariana", 27.6),
-            _room("tomas", 27.2),
+            _room("bedroom_2", 27.6),
+            _room("bedroom_3", 27.2),
             _room("guest", 26.9),
             _room("bathroom", 25.5),
         ],
@@ -159,11 +159,11 @@ def scenario_mixed():
     """Full house, realistic wide spread (~1.8 °C) with mild heat ingress."""
     return simulator.Scenario(
         rooms=[
-            _room("mariana", 28.0, drift=0.004),
-            _room("tomas", 27.6, drift=0.004),
+            _room("bedroom_2", 28.0, drift=0.004),
+            _room("bedroom_3", 27.6, drift=0.004),
             _room("guest", 27.1, drift=0.004),
             _room("master", 26.8, drift=0.004),
-            _room("matias", 26.7, drift=0.004),
+            _room("bedroom_1", 26.7, drift=0.004),
             _room("bathroom", 26.2, drift=0.004),
         ],
         setpoint_c=SETPOINT_C,
@@ -175,7 +175,7 @@ def scenario_mixed():
 
 
 SCENARIOS = {
-    "Mariana-pinned": scenario_mariana_pinned,
+    "Bedroom 2-pinned": scenario_bedroom_2_pinned,
     "Bathroom-overcooled": scenario_bathroom_overcooled,
     "Mixed": scenario_mixed,
 }

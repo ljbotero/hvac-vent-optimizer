@@ -250,9 +250,9 @@ Treat these as authoritative project context for algorithm work. Primary objecti
 - **Thermostat:** Ecobee, upstairs zone — entity `climate.upstairs_motion_and_temp` (reports `hvac_action`). 4 conventional (always-open) vents configured on this thermostat.
 - **Vents:** Flair smart vents + pucks. Rooms with vents:
   - Master Bedroom (2 vents — a multi-vent group)
-  - Matias
-  - Mariana (chronic laggard / airflow-limited; learned cooling efficiency ~0.017)
-  - Tomas
+  - Bedroom 1
+  - Bedroom 2 (chronic laggard / airflow-limited; learned cooling efficiency ~0.017)
+  - Bedroom 3
   - Main Bathroom (most efficient; tends to overcool)
   - Guest Room
   - Game Room

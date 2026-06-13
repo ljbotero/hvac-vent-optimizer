@@ -145,7 +145,7 @@ def test_reach_floor_open_is_immediate_within_cooldown():
     every vent is inside the cooldown window, the floor-reach open is immediate.
     """
     rooms = [
-        {"id": "hot", "name": "Mariana", "temp": 27.9, "active": True, "open": 100, "eff": 0.017},
+        {"id": "hot", "name": "Bedroom 2", "temp": 27.9, "active": True, "open": 100, "eff": 0.017},
         {"id": "warm0", "name": "Warm0", "temp": 24.0, "active": True, "open": 0, "eff": 0.5},
         {"id": "warm1", "name": "Warm1", "temp": 24.0, "active": True, "open": 0, "eff": 0.5},
     ]
@@ -172,7 +172,7 @@ def test_balancing_move_within_cooldown_is_held():
     pure balancing move and must be held while inside the cooldown window.
     """
     rooms = [
-        {"id": "hot", "name": "Mariana", "temp": 27.9, "active": True, "open": 50, "eff": 0.017},
+        {"id": "hot", "name": "Bedroom 2", "temp": 27.9, "active": True, "open": 50, "eff": 0.017},
         {"id": "cold", "name": "Bathroom", "temp": 22.0, "active": True, "open": 0, "eff": 0.438},
     ]
     coord, api, thermostat, data = _build(rooms, conventional=8)
@@ -188,7 +188,7 @@ def test_balancing_move_within_cooldown_is_held():
 def test_balancing_move_commanded_when_not_in_cooldown():
     """Control: the same balancing move IS applied once the cooldown has elapsed."""
     rooms = [
-        {"id": "hot", "name": "Mariana", "temp": 27.9, "active": True, "open": 50, "eff": 0.017},
+        {"id": "hot", "name": "Bedroom 2", "temp": 27.9, "active": True, "open": 50, "eff": 0.017},
         {"id": "cold", "name": "Bathroom", "temp": 22.0, "active": True, "open": 0, "eff": 0.438},
     ]
     coord, api, thermostat, data = _build(rooms, conventional=8)
@@ -218,10 +218,10 @@ def test_floor_pad_never_forces_a_close():
     (which is itself above the floor pad, so the floor stays satisfied).
     """
     rooms = [
-        {"id": "slow", "name": "Mariana", "temp": 27.9, "active": True, "open": 0, "eff": 0.017},
-        {"id": "mid", "name": "Matias", "temp": 23.5, "active": True, "open": 80, "eff": 0.6},
+        {"id": "slow", "name": "Bedroom 2", "temp": 27.9, "active": True, "open": 0, "eff": 0.017},
+        {"id": "mid", "name": "Bedroom 1", "temp": 23.5, "active": True, "open": 80, "eff": 0.6},
         {"id": "s1", "name": "Guest", "temp": 22.0, "active": True, "open": 0, "eff": 0.3},
-        {"id": "s2", "name": "Tomas", "temp": 22.0, "active": True, "open": 0, "eff": 0.3},
+        {"id": "s2", "name": "Bedroom 3", "temp": 22.0, "active": True, "open": 0, "eff": 0.3},
     ]
     coord, api, thermostat, data = _build(rooms)
     # mid is inside the cooldown window; slow is free to open (keeps combined safe).
@@ -248,10 +248,10 @@ def test_floor_pad_close_is_held_for_legacy_strategy():
     immediate safety open, for ``dab``/``cost``/``stats``/``hybrid`` too (R17.5).
     """
     rooms = [
-        {"id": "slow", "name": "Mariana", "temp": 27.9, "active": True, "open": 0, "eff": 0.017},
-        {"id": "mid", "name": "Matias", "temp": 23.5, "active": True, "open": 80, "eff": 0.6},
+        {"id": "slow", "name": "Bedroom 2", "temp": 27.9, "active": True, "open": 0, "eff": 0.017},
+        {"id": "mid", "name": "Bedroom 1", "temp": 23.5, "active": True, "open": 80, "eff": 0.6},
         {"id": "s1", "name": "Guest", "temp": 22.0, "active": True, "open": 0, "eff": 0.3},
-        {"id": "s2", "name": "Tomas", "temp": 22.0, "active": True, "open": 0, "eff": 0.3},
+        {"id": "s2", "name": "Bedroom 3", "temp": 22.0, "active": True, "open": 0, "eff": 0.3},
     ]
     coord, api, thermostat, data = _build(rooms, strategy="dab")
     coord._vent_last_commanded["mid"] = datetime.now(UTC)

@@ -13,7 +13,7 @@
     vent_id:
       name: Vent ID
       description: Vent id (room_id is resolved from this).
-      example: "472379e6-8282-5911-390c-835c6d6e0f9e"
+      example: "abcd1234-5678-90ab-cdef-1234567890ab"
     active:
       name: Active
       description: True to mark room active, false to mark inactive.
@@ -34,7 +34,7 @@ set_room_setpoint:
     vent_id:
       name: Vent ID
       description: Vent id (room_id is resolved from this).
-      example: "472379e6-8282-5911-390c-835c6d6e0f9e"
+      example: "abcd1234-5678-90ab-cdef-1234567890ab"
     set_point_c:
       name: Setpoint (C)
       description: Target setpoint in Celsius.

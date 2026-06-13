@@ -3,7 +3,7 @@
 TESTS-FIRST: this file is written BEFORE the A4 cross-coupling guard
 (``apply_cross_coupling`` / ``DuctSignals``) exists. The A3 airflow-limited
 detection already lives in ``allocate()`` (Task 9.2); the tests in
-``TestAirflowLimitedDetection`` *verify and pin* that behaviour (the Mariana
+``TestAirflowLimitedDetection`` *verify and pin* that behaviour (the Bedroom 2
 case + margin/error boundaries). The tests in ``TestCrossCoupling`` /
 ``TestDuctSignals`` are RED until Task 11 implements the explicit A4 guard.
 
@@ -111,9 +111,9 @@ def _settings(**overrides):
 
 # Worked-example rooms (design A1b — cooling, setpoint 26.1 °C).
 _ROOM_DATA: dict[str, tuple[float, float]] = {
-    "Mariana": (27.9, 0.017),
-    "Tomas": (27.7, 0.020),
-    "Matias": (26.6, 0.072),
+    "Bedroom 2": (27.9, 0.017),
+    "Bedroom 3": (27.7, 0.020),
+    "Bedroom 1": (26.6, 0.072),
     "Master": (26.4, 0.053),
     "Guest": (27.0, 0.033),
     "Bathroom": (25.7, 0.438),
@@ -129,19 +129,19 @@ def _worked_rooms():
 # _Requirements: 5.1_
 # ===========================================================================
 class TestAirflowLimitedDetection:
-    def test_mariana_case_is_flagged(self):
-        # Mariana is the bottleneck (lowest efficiency, largest tau) → pinned at
+    def test_bedroom_2_case_is_flagged(self):
+        # Bedroom 2 is the bottleneck (lowest efficiency, largest tau) → pinned at
         # 100 % with err 1.8 > error_c 0.5 → airflow-limited.
         result = balance.allocate(_worked_rooms(), SETPOINT_C, MODE, _settings())
-        assert result.targets["Mariana"] == 100.0
-        assert "Mariana" in result.airflow_limited
+        assert result.targets["Bedroom 2"] == 100.0
+        assert "Bedroom 2" in result.airflow_limited
 
     def test_throttled_room_below_margin_not_flagged(self):
-        # Tomas is off-target by 1.6 °C (> error_c) but throttled to ~75 % which
+        # Bedroom 3 is off-target by 1.6 °C (> error_c) but throttled to ~75 % which
         # is below the 95 % margin threshold → NOT airflow-limited (margin gate).
         result = balance.allocate(_worked_rooms(), SETPOINT_C, MODE, _settings())
-        assert result.targets["Tomas"] < 95.0
-        assert "Tomas" not in result.airflow_limited
+        assert result.targets["Bedroom 3"] < 95.0
+        assert "Bedroom 3" not in result.airflow_limited
 
     def test_satisfied_room_never_flagged(self):
         result = balance.allocate(_worked_rooms(), SETPOINT_C, MODE, _settings())
@@ -192,31 +192,31 @@ class TestCrossCouplingContractExists:
 # ===========================================================================
 class TestCrossCoupling:
     def test_satisfied_room_pushed_to_zero_when_airflow_limited(self):
-        # Laggard "Mariana" is airflow-limited; a satisfied room hypothetically
+        # Laggard "Bedroom 2" is airflow-limited; a satisfied room hypothetically
         # carrying residual aperture must be pushed to 0 % to feed the laggard.
         rooms = [
-            _room("Mariana", temp_c=27.9, efficiency=0.017),  # err +1.8
+            _room("Bedroom 2", temp_c=27.9, efficiency=0.017),  # err +1.8
             _room("Bathroom", temp_c=25.7, efficiency=0.438),  # err -0.4 (satisfied)
         ]
-        targets = {"Mariana": 100.0, "Bathroom": 30.0}  # satisfied room non-zero
-        airflow_limited = frozenset({"Mariana"})
+        targets = {"Bedroom 2": 100.0, "Bathroom": 30.0}  # satisfied room non-zero
+        airflow_limited = frozenset({"Bedroom 2"})
         new = balance.apply_cross_coupling(
             targets, rooms, MODE, SETPOINT_C, _settings(), airflow_limited
         )
         assert new["Bathroom"] == 0.0  # pushed closed
-        assert new["Mariana"] == 100.0  # laggard untouched
+        assert new["Bedroom 2"] == 100.0  # laggard untouched
         # Input dict is not mutated (pure).
         assert targets["Bathroom"] == 30.0
 
     def test_airflow_limited_room_itself_not_closed(self):
         # The laggard is off-target (err > 0), so it is never a push target even
         # though the guard runs.
-        rooms = [_room("Mariana", temp_c=27.9, efficiency=0.017)]
-        targets = {"Mariana": 100.0}
+        rooms = [_room("Bedroom 2", temp_c=27.9, efficiency=0.017)]
+        targets = {"Bedroom 2": 100.0}
         new = balance.apply_cross_coupling(
-            targets, rooms, MODE, SETPOINT_C, _settings(), frozenset({"Mariana"})
+            targets, rooms, MODE, SETPOINT_C, _settings(), frozenset({"Bedroom 2"})
         )
-        assert new["Mariana"] == 100.0
+        assert new["Bedroom 2"] == 100.0
 
     def test_no_push_when_no_airflow_limited_room(self):
         # Nothing is airflow-limited → no bottleneck to feed → satisfied room
@@ -234,17 +234,17 @@ class TestCrossCoupling:
     def test_disabled_crosscoupling_does_not_push(self):
         # settings.crosscoupling == False disables the extra push entirely (R6.4).
         rooms = [
-            _room("Mariana", temp_c=27.9, efficiency=0.017),
+            _room("Bedroom 2", temp_c=27.9, efficiency=0.017),
             _room("Bathroom", temp_c=25.7, efficiency=0.438),
         ]
-        targets = {"Mariana": 100.0, "Bathroom": 30.0}
+        targets = {"Bedroom 2": 100.0, "Bathroom": 30.0}
         new = balance.apply_cross_coupling(
             targets,
             rooms,
             MODE,
             SETPOINT_C,
             _settings(crosscoupling=False),
-            frozenset({"Mariana"}),
+            frozenset({"Bedroom 2"}),
         )
         assert new["Bathroom"] == 30.0  # untouched
         assert new == targets
@@ -253,24 +253,24 @@ class TestCrossCoupling:
         # A room still needing conditioning (err > 0) but not airflow-limited
         # must NOT be closed by cross-coupling — only at/past-setpoint rooms are.
         rooms = [
-            _room("Mariana", temp_c=27.9, efficiency=0.017),  # limited laggard
+            _room("Bedroom 2", temp_c=27.9, efficiency=0.017),  # limited laggard
             _room("Guest", temp_c=27.0, efficiency=0.033),  # err +0.9, throttled
         ]
-        targets = {"Mariana": 100.0, "Guest": 18.0}
+        targets = {"Bedroom 2": 100.0, "Guest": 18.0}
         new = balance.apply_cross_coupling(
-            targets, rooms, MODE, SETPOINT_C, _settings(), frozenset({"Mariana"})
+            targets, rooms, MODE, SETPOINT_C, _settings(), frozenset({"Bedroom 2"})
         )
         assert new["Guest"] == 18.0  # still needs air → left alone
 
     def test_inactive_room_not_touched(self):
         # Inactive rooms are held by the coordinator; cross-coupling ignores them.
         rooms = [
-            _room("Mariana", temp_c=27.9, efficiency=0.017),
+            _room("Bedroom 2", temp_c=27.9, efficiency=0.017),
             _room("OffSat", temp_c=24.0, efficiency=0.4, active=False),
         ]
-        targets = {"Mariana": 100.0, "OffSat": 30.0}
+        targets = {"Bedroom 2": 100.0, "OffSat": 30.0}
         new = balance.apply_cross_coupling(
-            targets, rooms, MODE, SETPOINT_C, _settings(), frozenset({"Mariana"})
+            targets, rooms, MODE, SETPOINT_C, _settings(), frozenset({"Bedroom 2"})
         )
         assert new["OffSat"] == 30.0
 
@@ -310,11 +310,11 @@ class TestCrossCouplingFloorInteraction:
 class TestDuctSignals:
     def _scenario(self):
         rooms = [
-            _room("Mariana", temp_c=27.9, efficiency=0.017),
+            _room("Bedroom 2", temp_c=27.9, efficiency=0.017),
             _room("Bathroom", temp_c=25.7, efficiency=0.438),
         ]
-        targets = {"Mariana": 100.0, "Bathroom": 30.0}
-        return rooms, targets, frozenset({"Mariana"})
+        targets = {"Bedroom 2": 100.0, "Bathroom": 30.0}
+        return rooms, targets, frozenset({"Bedroom 2"})
 
     def test_duct_indicating_no_airflow_vetoes_push(self):
         # Cooling but the duct is NOT delivering cold air (duct temp ≈ ambient)
@@ -375,10 +375,10 @@ class TestDuctSignals:
 # ===========================================================================
 class TestAllocateIntegration:
     def test_allocate_keeps_satisfied_closed_with_limited_room(self):
-        # In the worked example Mariana is airflow-limited and the satisfied
+        # In the worked example Bedroom 2 is airflow-limited and the satisfied
         # Bathroom is at 0 %; with cross-coupling on, that holds.
         result = balance.allocate(_worked_rooms(), SETPOINT_C, MODE, _settings(crosscoupling=True))
-        assert "Mariana" in result.airflow_limited
+        assert "Bedroom 2" in result.airflow_limited
         assert result.targets["Bathroom"] == 0.0
 
     def test_allocate_accepts_optional_duct_argument(self):

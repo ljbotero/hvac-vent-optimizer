@@ -518,7 +518,7 @@ class VentCurve:
 # ===========================================================================
 # Multi-vent room GROUP learning (R23.1 / R25.2)
 # ===========================================================================
-# A room served by >= 2 smart vents (e.g. Master Bedroom `4723` + `6ee4`) is one
+# A room served by >= 2 smart vents (e.g. Master Bedroom `vent_a` + `vent_b`) is one
 # logical unit: the vents share the room temperature and receive identical
 # targets (R23.1). Learning is therefore done at the room-GROUP level using the
 # COMBINED flow, and a single `e_room` / `leak` is attributed to the group.

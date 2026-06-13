@@ -19,7 +19,7 @@ PINNED CONTRACT (for Task 6 to implement)
 ====================================================================
 Why this exists — multi-vent rooms (R23.1)
 ------------------------------------------
-A room served by ≥2 smart vents (e.g. Master Bedroom `4723` + `6ee4`) is one
+A room served by ≥2 smart vents (e.g. Master Bedroom `vent_a` + `vent_b`) is one
 logical unit: the vents share the room temperature and receive identical
 targets. So learning is done at the room-GROUP level using the COMBINED flow,
 and a single `e_room` / `leak` is attributed to the group. Per-vent `leak`

@@ -5,7 +5,7 @@ These exercise the *real* coordinator deviation/hold check in
 ``conftest.py``. They prove two coupled behaviors required by R5.2/R7.1/R7.2:
 
 * **Airflow-limited rooms are excluded from the "all rooms tracking"
-  determination (R5.2).** A pinned-but-hot room (Mariana) physically cannot
+  determination (R5.2).** A pinned-but-hot room (Bedroom 2) physically cannot
   track its predicted slope, so its (expected) deviation must neither force a
   recompute (churn) nor be counted as "tracking" in a way that produces a
   *false hold*.
@@ -152,12 +152,12 @@ def _run(coord, thermostat, data):
 # 1. A pinned-but-hot airflow-limited room must NOT force a false hold.
 # ---------------------------------------------------------------------------
 def test_balance_airflow_limited_room_does_not_force_false_hold():
-    # Mariana: pinned at 100 %, still hot (27.9) and low efficiency -> airflow
+    # Bedroom 2: pinned at 100 %, still hot (27.9) and low efficiency -> airflow
     # limited. Bathroom: overcooled (22.0) -> satisfied. Both *track* their
     # predicted slope (deviation 0), so the legacy deviation-only check would
     # HOLD. But the active-room spread is huge, so balance must recompute/act.
     rooms = [
-        {"id": "mariana", "name": "Mariana", "temp": 27.9, "active": True, "open": 100, "eff": 0.017},
+        {"id": "bedroom_2", "name": "Bedroom 2", "temp": 27.9, "active": True, "open": 100, "eff": 0.017},
         {"id": "bath", "name": "Bathroom", "temp": 22.0, "active": True, "open": 0, "eff": 0.438},
     ]
     coord, _api, thermostat, data = _build(rooms)
@@ -213,10 +213,10 @@ def test_balance_airflow_limited_excluded_from_deviation_determination():
     # track), but because it is airflow-limited it is excluded -> HOLD (no
     # churn).
     rooms = [
-        {"id": "mariana", "name": "Mariana", "temp": 27.9, "active": True, "open": 100, "eff": 0.017},
+        {"id": "bedroom_2", "name": "Bedroom 2", "temp": 27.9, "active": True, "open": 100, "eff": 0.017},
     ]
     coord, _api, thermostat, data = _build(rooms)
-    _seed_cycle(coord, thermostat, rooms, deviations={"mariana": 2.0})
+    _seed_cycle(coord, thermostat, rooms, deviations={"bedroom_2": 2.0})
     _run(coord, thermostat, data)
     assert coord._hold_status == "holding", (
         "an airflow-limited room's expected deviation must not force a recompute"
@@ -243,9 +243,9 @@ def test_legacy_strategy_recomputes_on_large_deviation_without_exclusion():
     # A legacy strategy must still recompute when a (would-be airflow-limited)
     # room deviates beyond threshold — no airflow-limited exclusion applies.
     rooms = [
-        {"id": "mariana", "name": "Mariana", "temp": 27.9, "active": True, "open": 100, "eff": 0.017},
+        {"id": "bedroom_2", "name": "Bedroom 2", "temp": 27.9, "active": True, "open": 100, "eff": 0.017},
     ]
     coord, _api, thermostat, data = _build(rooms, strategy="dab")
-    _seed_cycle(coord, thermostat, rooms, deviations={"mariana": 2.0})
+    _seed_cycle(coord, thermostat, rooms, deviations={"bedroom_2": 2.0})
     _run(coord, thermostat, data)
     assert coord._hold_status == "recalculating"

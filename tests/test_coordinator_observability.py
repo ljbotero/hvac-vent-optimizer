@@ -101,9 +101,9 @@ def _run(coord, thermostat, data, action="cooling"):
     asyncio.run(coord._async_apply_dab_adjustments(thermostat, action, vent_ids, data))
 
 
-# Mariana pinned-hot, Bathroom overcooled, Guest mid; one inactive far-out room.
+# Bedroom 2 pinned-hot, Bathroom overcooled, Guest mid; one inactive far-out room.
 _ROOMS = [
-    {"id": "mariana", "name": "Mariana", "temp": 27.9, "active": True, "open": 100, "eff": 0.017},
+    {"id": "bedroom_2", "name": "Bedroom 2", "temp": 27.9, "active": True, "open": 100, "eff": 0.017},
     {"id": "bath", "name": "Bathroom", "temp": 22.0, "active": True, "open": 0, "eff": 0.438},
     {"id": "guest", "name": "Guest", "temp": 25.0, "active": True, "open": 50, "eff": 0.05},
     {"id": "attic", "name": "Attic", "temp": 35.0, "active": False, "open": 0, "eff": 0.05},
@@ -128,7 +128,7 @@ def test_max_active_error_is_absolute_against_setpoint():
     # expectation from the resolved cooling setpoint so the test tracks the
     # real control law rather than a hard-coded value.
     setpoint = coord._get_thermostat_setpoint(thermostat, "cooling")
-    expected = round(abs(27.9 - setpoint), 2)  # Mariana is the hottest active room
+    expected = round(abs(27.9 - setpoint), 2)  # Bedroom 2 is the hottest active room
     assert coord.get_max_active_error() == expected
 
 
@@ -146,7 +146,7 @@ def test_signed_error_negative_for_overcooled_room_cooling():
     coord, _api, thermostat, data = _build(_ROOMS, target_temp=24.0)
     _run(coord, thermostat, data)
     assert coord.get_room_signed_error("room_bath") < 0  # 22.0 - 24.0 = -2.0
-    assert coord.get_room_signed_error("room_mariana") > 0  # 27.9 - 24.0 = +3.9
+    assert coord.get_room_signed_error("room_bedroom_2") > 0  # 27.9 - 24.0 = +3.9
 
 
 def test_signed_error_negative_for_overheated_room_heating():
@@ -169,7 +169,7 @@ def test_signed_error_negative_for_overheated_room_heating():
 def test_airflow_limited_flag_set_for_pinned_hot_room():
     coord, _api, thermostat, data = _build(_ROOMS)
     _run(coord, thermostat, data)
-    assert coord.is_room_airflow_limited("room_mariana") is True
+    assert coord.is_room_airflow_limited("room_bedroom_2") is True
     assert coord.is_room_airflow_limited("room_bath") is False
     assert coord.is_room_airflow_limited("room_guest") is False
 

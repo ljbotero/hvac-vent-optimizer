@@ -100,10 +100,10 @@ A room is eligible for floor padding iff ``room.active and signed_error_c > 0``;
 NOTE on the design's "Guest 18→28 %" illustration (flagged discrepancy)
 ----------------------------------------------------------------------------
 Design A1b says the floor pads "the highest-error rooms slightly (e.g., Guest
-18→28 %)". Guest's error is only 0.9 °C — Tomas (1.6 °C) is the highest-error
-room still below 100 % (Mariana at 1.8 °C is already pinned at 100 % and is not
+18→28 %)". Guest's error is only 0.9 °C — Bedroom 3 (1.6 °C) is the highest-error
+room still below 100 % (Bedroom 2 at 1.8 °C is already pinned at 100 % and is not
 eligible). R3.4 is explicit: bias toward the *largest error-to-setpoint*. These
-tests therefore follow R3.4 (Tomas is padded first), treating the design's
+tests therefore follow R3.4 (Bedroom 3 is padded first), treating the design's
 "Guest" figure as a loose illustration. The requirement, not the example, is the
 source of truth for this CRITICAL path. (Reported to the orchestrator.)
 """
@@ -179,20 +179,20 @@ def _settings(**overrides):
 
 # Worked-example data (design A1b — cooling, setpoint 26.1 °C).
 # Pre-floor targets are the gran-5 rounded output of allocate() (see
-# test_balance_allocate.py): Mariana 100, Tomas 75, Guest 20, rest 0.
+# test_balance_allocate.py): Bedroom 2 100, Bedroom 3 75, Guest 20, rest 0.
 _WORKED_SIGNED_ERR = {
-    "Mariana": 1.8,
-    "Tomas": 1.6,
+    "Bedroom 2": 1.8,
+    "Bedroom 3": 1.6,
     "Guest": 0.9,
-    "Matias": 0.5,
+    "Bedroom 1": 0.5,
     "Master": 0.3,
     "Bathroom": -0.4,  # satisfied (below setpoint)
 }
 _WORKED_BASE_TARGETS = {
-    "Mariana": 100.0,
-    "Tomas": 75.0,
+    "Bedroom 2": 100.0,
+    "Bedroom 3": 75.0,
     "Guest": 20.0,
-    "Matias": 0.0,
+    "Bedroom 1": 0.0,
     "Master": 0.0,
     "Bathroom": 0.0,
 }
@@ -231,10 +231,10 @@ class TestCombinedOpenPct:
         # Smart targets 100+73+18 = 191 over 6 smart devices, plus 4 conventional
         # @50 % (=200), over 6+4 = 10 devices: (191 + 200) / 10 = 39.1 %.
         targets = {
-            "Mariana": 100.0,
-            "Tomas": 73.0,
+            "Bedroom 2": 100.0,
+            "Bedroom 3": 73.0,
             "Guest": 18.0,
-            "Matias": 0.0,
+            "Bedroom 1": 0.0,
             "Master": 0.0,
             "Bathroom": 0.0,
         }
@@ -391,20 +391,20 @@ class TestWorkedExample:
         new, _ = balance.apply_safety_floor(
             dict(_WORKED_BASE_TARGETS), _worked_rooms(), self._settings()
         )
-        assert new["Mariana"] == 100.0          # bottleneck, can't pad past 100
+        assert new["Bedroom 2"] == 100.0          # bottleneck, can't pad past 100
         assert new["Bathroom"] == 0.0           # satisfied → never reopened (R3.4)
 
     def test_highest_error_eligible_room_is_padded(self):
         # Eligible = active, signed_error > 0, base target < 100.
-        # Mariana(1.8) is at 100 → ineligible; Tomas(1.6) is the highest-error
-        # eligible room, so Tomas is padded (75 → 80). Following R3.4, NOT Guest.
+        # Bedroom 2(1.8) is at 100 → ineligible; Bedroom 3(1.6) is the highest-error
+        # eligible room, so Bedroom 3 is padded (75 → 80). Following R3.4, NOT Guest.
         new, _ = balance.apply_safety_floor(
             dict(_WORKED_BASE_TARGETS), _worked_rooms(), self._settings()
         )
-        assert new["Tomas"] == pytest.approx(80.0, abs=1e-6)
+        assert new["Bedroom 3"] == pytest.approx(80.0, abs=1e-6)
         # The lower-error rooms are left exactly where allocation put them.
         assert new["Guest"] == 20.0
-        assert new["Matias"] == 0.0
+        assert new["Bedroom 1"] == 0.0
         assert new["Master"] == 0.0
 
     def test_floor_only_ever_raises_and_clamps_at_100(self):

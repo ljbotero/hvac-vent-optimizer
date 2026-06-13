@@ -26,26 +26,26 @@ Because flow_i(1.0) = 1.0, rate_i(1.0) = e_i, so the full-open finish time is
 
 | Room     | T_i  | err_i | e_i   | tau_i = err_i / e_i        |
 |----------|------|-------|-------|----------------------------|
-| Mariana  | 27.9 | 1.8   | 0.017 | 1.8/0.017   = 105.882 min  | <- bottleneck (max tau)
-| Tomas    | 27.7 | 1.6   | 0.020 | 1.6/0.020   =  80.000 min  |
-| Matias   | 26.6 | 0.5   | 0.072 | 0.5/0.072   =   6.944 min  |
+| Bedroom 2  | 27.9 | 1.8   | 0.017 | 1.8/0.017   = 105.882 min  | <- bottleneck (max tau)
+| Bedroom 3    | 27.7 | 1.6   | 0.020 | 1.6/0.020   =  80.000 min  |
+| Bedroom 1   | 26.6 | 0.5   | 0.072 | 0.5/0.072   =   6.944 min  |
 | Master   | 26.4 | 0.3   | 0.053 | 0.3/0.053   =   5.660 min  |
 | Guest    | 27.0 | 0.9   | 0.033 | 0.9/0.033   =  27.273 min  |
 | Bathroom | 25.7 | -0.4  | 0.438 | satisfied (25.7 <= 25.8)   | -> 0 %
 
-tau* = 105.882 min (Mariana) -> Mariana runs at 100 %.
+tau* = 105.882 min (Bedroom 2) -> Bedroom 2 runs at 100 %.
 
 Throttle the rest to finish at tau* (note required_flow_i simplifies to
 tau_i/tau* because required_flow = (err/tau*)/e = (err/e)/tau* = tau_i/tau*):
 
-  Tomas : required_flow = 80.000/105.882 = 0.755556
+  Bedroom 3 : required_flow = 80.000/105.882 = 0.755556
           a = (0.755556 - 0.1) / 0.9 = 0.655556 / 0.9 = 0.728395 -> 72.84 %
   Guest : required_flow = 27.273/105.882 = 0.257584
           a = (0.257584 - 0.1) / 0.9 = 0.157584 / 0.9 = 0.175094 -> 17.51 %
-  Matias: required_flow = 6.944/105.882  = 0.065590 <= leak 0.1 -> a = 0 %
+  Bedroom 1: required_flow = 6.944/105.882  = 0.065590 <= leak 0.1 -> a = 0 %
   Master: required_flow = 5.660/105.882  = 0.053460 <= leak 0.1 -> a = 0 %
 
-Design A1b states the rounded targets as Tomas ~73 % and Guest ~18 %.
+Design A1b states the rounded targets as Bedroom 3 ~73 % and Guest ~18 %.
 
 ----------------------------------------------------------------------------
 Test isolation / settings choices (documented per Task 9.1 instructions)
@@ -94,9 +94,9 @@ LEAK = 0.1
 
 # room_id -> (temp_c, efficiency e_i)
 _ROOM_DATA: dict[str, tuple[float, float]] = {
-    "Mariana": (27.9, 0.017),
-    "Tomas": (27.7, 0.020),
-    "Matias": (26.6, 0.072),
+    "Bedroom 2": (27.9, 0.017),
+    "Bedroom 3": (27.7, 0.020),
+    "Bedroom 1": (26.6, 0.072),
     "Master": (26.4, 0.053),
     "Guest": (27.0, 0.033),
     "Bathroom": (25.7, 0.438),
@@ -193,15 +193,15 @@ def _allocate():
 # allocate() existing, so they document the expected numbers regardless).
 # ---------------------------------------------------------------------------
 class TestReferenceMath:
-    def test_bottleneck_is_mariana(self):
+    def test_bottleneck_is_bedroom_2(self):
         assert _bottleneck_tau() == pytest.approx(105.882, abs=0.01)
 
     def test_reference_targets_match_design(self):
         t = _expected_targets()
-        assert t["Mariana"] == pytest.approx(100.0, abs=ABS_TOL)
-        assert t["Tomas"] == pytest.approx(72.84, abs=0.05)
+        assert t["Bedroom 2"] == pytest.approx(100.0, abs=ABS_TOL)
+        assert t["Bedroom 3"] == pytest.approx(72.84, abs=0.05)
         assert t["Guest"] == pytest.approx(17.51, abs=0.05)
-        assert t["Matias"] == 0.0
+        assert t["Bedroom 1"] == 0.0
         assert t["Master"] == 0.0
         assert t["Bathroom"] == 0.0
 
@@ -228,18 +228,18 @@ class TestAllocateApiExists:
 class TestWorkedExample:
     """Design A1b numbers — the heart of Task 9.1."""
 
-    def test_mariana_is_the_bottleneck_and_runs_full_open(self):
-        # Mariana has the largest tau_i (err/rate at full open) -> 100 %.
+    def test_bedroom_2_is_the_bottleneck_and_runs_full_open(self):
+        # Bedroom 2 has the largest tau_i (err/rate at full open) -> 100 %.
         result = _allocate()
-        assert result.targets["Mariana"] == pytest.approx(100.0, abs=ABS_TOL)
+        assert result.targets["Bedroom 2"] == pytest.approx(100.0, abs=ABS_TOL)
 
-    def test_tomas_throttled_to_about_73_percent(self):
+    def test_bedroom_3_throttled_to_about_73_percent(self):
         result = _allocate()
-        expected = _expected_targets()["Tomas"]
+        expected = _expected_targets()["Bedroom 3"]
         # Derived value (72.84) ...
-        assert result.targets["Tomas"] == pytest.approx(expected, abs=ABS_TOL)
+        assert result.targets["Bedroom 3"] == pytest.approx(expected, abs=ABS_TOL)
         # ... and cross-check against the design's stated ~73 %.
-        assert result.targets["Tomas"] == pytest.approx(73.0, abs=ABS_TOL)
+        assert result.targets["Bedroom 3"] == pytest.approx(73.0, abs=ABS_TOL)
 
     def test_guest_throttled_to_about_18_percent(self):
         result = _allocate()
@@ -249,10 +249,10 @@ class TestWorkedExample:
         # ... and cross-check against the design's stated ~18 %.
         assert result.targets["Guest"] == pytest.approx(18.0, abs=ABS_TOL)
 
-    def test_matias_and_master_go_to_zero_required_flow_below_leak(self):
+    def test_bedroom_1_and_master_go_to_zero_required_flow_below_leak(self):
         # required_flow_i <= leak (0.1) -> aperture clamps to 0 %.
         result = _allocate()
-        assert result.targets["Matias"] == pytest.approx(0.0, abs=ABS_TOL)
+        assert result.targets["Bedroom 1"] == pytest.approx(0.0, abs=ABS_TOL)
         assert result.targets["Master"] == pytest.approx(0.0, abs=ABS_TOL)
 
     def test_bathroom_satisfied_goes_to_zero(self):
@@ -272,7 +272,7 @@ class TestNoOvercooling:
 
     The throttle makes every room with a commanded aperture > 0 arrive at the
     setpoint at (approximately) tau*, never earlier. Rooms whose required flow
-    is below their leak (Matias/Master) are clamped to 0 % and may finish early
+    is below their leak (Bedroom 1/Master) are clamped to 0 % and may finish early
     purely on leakage — that is unavoidable (we cannot command below leak), so
     they are excluded from this guarantee.
     """
@@ -290,7 +290,7 @@ class TestNoOvercooling:
     def test_bottleneck_finishes_last(self):
         result = _allocate()
         tau_star = _bottleneck_tau()
-        assert result.predicted_finish_min["Mariana"] == pytest.approx(tau_star, abs=1.0)
+        assert result.predicted_finish_min["Bedroom 2"] == pytest.approx(tau_star, abs=1.0)
 
 
 class TestDeterminism:

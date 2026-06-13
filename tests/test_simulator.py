@@ -57,17 +57,17 @@ simulator = _load("simulator")
 # Scenario helpers
 # ---------------------------------------------------------------------------
 def _cooling_scenario(**overrides):
-    """A small multi-room cooling scenario (Mariana-pinned style)."""
+    """A small multi-room cooling scenario (Bedroom 2-pinned style)."""
     rooms = [
         simulator.RoomScenario(
-            room_id="mariana",
+            room_id="bedroom_2",
             temp_c=27.5,
             efficiency=0.017,
             leak=0.1,
             idle_drift=0.0,
         ),
         simulator.RoomScenario(
-            room_id="tomas",
+            room_id="bedroom_3",
             temp_c=27.0,
             efficiency=0.020,
             leak=0.1,
@@ -318,7 +318,7 @@ def test_total_moves_counted_and_per_room_reported():
     scenario = _cooling_scenario()
     result = simulator.run(scenario, strategy="balance")
     assert result.total_moves > 0
-    assert set(result.moves_per_room) == {"mariana", "tomas", "bathroom"}
+    assert set(result.moves_per_room) == {"bedroom_2", "bedroom_3", "bathroom"}
     assert sum(result.moves_per_room.values()) == result.total_moves
 
 
@@ -346,7 +346,7 @@ def test_compare_runs_each_strategy_and_tabulates():
     ):
         assert label in cmp.table
     # moves/room is broken out per active room.
-    for rid in ("mariana", "tomas", "bathroom"):
+    for rid in ("bedroom_2", "bedroom_3", "bathroom"):
         assert rid in cmp.table
 
 

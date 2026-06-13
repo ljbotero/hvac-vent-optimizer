@@ -103,9 +103,9 @@ def test_room_sensor_exposes_signed_error_and_airflow_limited():
         "vents": {
             "v1": {
                 "id": "v1",
-                "name": "Mariana Vent",
+                "name": "Bedroom 2 Vent",
                 "attributes": {"percent-open": 100},
-                "room": {"id": "room1", "attributes": {"name": "Mariana"}},
+                "room": {"id": "room1", "attributes": {"name": "Bedroom 2"}},
             }
         },
         "pucks": {},
@@ -148,9 +148,9 @@ def test_room_airflow_limited_binary_sensor():
         "vents": {
             "v1": {
                 "id": "v1",
-                "name": "Mariana Vent",
+                "name": "Bedroom 2 Vent",
                 "attributes": {"percent-open": 100},
-                "room": {"id": "room1", "attributes": {"name": "Mariana"}},
+                "room": {"id": "room1", "attributes": {"name": "Bedroom 2"}},
             }
         },
         "pucks": {},
