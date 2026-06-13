@@ -1,0 +1,22 @@
+# Development / test dependencies for the HVAC Vent Optimizer custom integration.
+#
+# The component itself ships with no runtime requirements (see manifest.json);
+# Home Assistant provides everything at runtime. These pins cover the local
+# quality gates and test suite only. Install with:
+#   pip install -r requirements_test.txt
+#
+# Note: the test harness (tests/conftest.py) stubs out homeassistant, aiohttp
+# and voluptuous, so those are intentionally NOT listed here.
+
+# Test runner
+pytest==8.3.5
+pytest-asyncio==0.24.0
+
+# Property-based testing (Properties 1-12 in design.md; Hypothesis suites)
+hypothesis==6.151.9
+
+# Quality gates (kept in sync with .pre-commit-config.yaml)
+ruff==0.15.16
+black==25.1.0
+mypy==1.18.2
+pre-commit==4.0.1

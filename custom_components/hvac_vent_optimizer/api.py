@@ -114,55 +114,50 @@ class FlairApi:
         await self._get_rate_limiter(path).acquire()
         await self.async_authenticate()
         headers = kwargs.pop("headers", {})
-        headers["Authorization"] = f"Bearer {self._access_token}"
         headers.setdefault("Accept", "application/vnd.api+json")
 
         async def _do_request() -> aiohttp.ClientResponse:
+            request_headers = dict(headers)
+            request_headers["Authorization"] = f"Bearer {self._access_token}"
             return await self._session.request(
                 method,
                 f"{self.BASE_URL}{path}",
-                headers=headers,
+                headers=request_headers,
                 timeout=aiohttp.ClientTimeout(total=10),
                 **kwargs,
             )
 
-        async with await _do_request() as resp:
-            if resp.status in {401, 403}:
-                self._access_token = None
-                raise FlairApiAuthError("Flair token expired or unauthorized")
-            if resp.status == 429:
-                retry_after = resp.headers.get("Retry-After")
-                try:
-                    wait_for = float(retry_after) if retry_after else 1.0
-                except ValueError:
-                    wait_for = 1.0
-                await asyncio.sleep(wait_for)
-                async with await _do_request() as retry_resp:
-                    if retry_resp.status in {401, 403}:
-                        self._access_token = None
+        auth_retried = False
+        rate_retried = False
+        while True:
+            async with await _do_request() as resp:
+                if resp.status in {401, 403}:
+                    # Token may have expired mid-flight; refresh once and retry.
+                    self._access_token = None
+                    if auth_retried:
                         raise FlairApiAuthError("Flair token expired or unauthorized")
-                    if retry_resp.status >= 400:
-                        body = await retry_resp.text()
-                        raise FlairApiError(
-                            f"Flair API error: HTTP {retry_resp.status}: {body}"
-                        )
+                    auth_retried = True
+                    await self.async_authenticate()
+                    continue
+                if resp.status == 429 and not rate_retried:
+                    rate_retried = True
+                    retry_after = resp.headers.get("Retry-After")
                     try:
-                        return await retry_resp.json()
-                    except (aiohttp.ContentTypeError, json.JSONDecodeError) as err:
-                        body = await retry_resp.text()
-                        raise FlairApiError(
-                            f"Flair API non-JSON response: HTTP {retry_resp.status}: {body}"
-                        ) from err
-            if resp.status >= 400:
-                body = await resp.text()
-                raise FlairApiError(f"Flair API error: HTTP {resp.status}: {body}")
-            try:
-                return await resp.json()
-            except (aiohttp.ContentTypeError, json.JSONDecodeError) as err:
-                body = await resp.text()
-                raise FlairApiError(
-                    f"Flair API non-JSON response: HTTP {resp.status}: {body}"
-                ) from err
+                        wait_for = float(retry_after) if retry_after else 1.0
+                    except ValueError:
+                        wait_for = 1.0
+                    await asyncio.sleep(wait_for)
+                    continue
+                if resp.status >= 400:
+                    body = await resp.text()
+                    raise FlairApiError(f"Flair API error: HTTP {resp.status}: {body}")
+                try:
+                    return await resp.json()
+                except (aiohttp.ContentTypeError, json.JSONDecodeError) as err:
+                    body = await resp.text()
+                    raise FlairApiError(
+                        f"Flair API non-JSON response: HTTP {resp.status}: {body}"
+                    ) from err
 
     async def async_get_structures(self) -> list[dict[str, str]]:
         """Return a list of structures with id and name."""

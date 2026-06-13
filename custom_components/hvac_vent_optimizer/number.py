@@ -1,13 +1,9 @@
 """Number entities for manual vent apertures."""
 from __future__ import annotations
 
-from homeassistant.components.number import NumberEntity, NumberMode
+from homeassistant.components.number import NumberEntity, NumberMode, RestoreNumber
 from homeassistant.components.sensor import SensorStateClass
 from homeassistant.const import PERCENTAGE
-try:
-    from homeassistant.helpers.restore_state import RestoreNumber
-except ImportError:  # pragma: no cover - older HA versions
-    from homeassistant.helpers.restore_state import RestoreEntity as RestoreNumber
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN

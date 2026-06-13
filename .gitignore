@@ -1,12 +1,42 @@
+# Byte-compiled / optimized / DLL files
 __pycache__/
-*.pyc
-*.pyo
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+*.egg-info/
+dist/
+build/
+
+# Type checking / linting caches
+.mypy_cache/
+.ruff_cache/
+.pylint.d/
+
+# Testing
 .pytest_cache/
+.hypothesis/
 .coverage
+htmlcov/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Efficiency export files (user-generated, may contain secrets/structure IDs)
+*_efficiency_export_*.json
+
+# --- App-specific / deployment artifacts (from published main) ---
 .codex/
+.private
+*.log
 eficiency_export.json
 smarter_flair_vents_efficiency_debug.json
 smart_vents_dashboard.yaml
-*.log
-.DS_Store
-.private

@@ -53,11 +53,11 @@
     "step": {
       "menu": {
         "title": "HVAC Vent Optimizer options",
-        "description": "Choose which settings to configure. Start with brand selection, then DAB & polling."
+        "description": "Choose which settings to configure. Start with brand selection, then DAB & polling.\n\nSupport the project: https://github.com/sponsors/ljbotero"
       },
       "algorithm_settings": {
         "title": "Algorithm & polling",
-        "description": "Tune Dynamic Airflow Balancing (DAB) and polling behavior.\n\n- Use DAB: automatically adjusts vents based on room efficiency.\n- Force manual: sets the vendor structure to manual when DAB runs.\n- Close inactive rooms: closes vents for rooms marked inactive (airflow safety may reopen some vents).\n- Granularity: rounds vent changes to reduce frequent adjustments.\n- Polling intervals: refresh rates for active vs idle HVAC.\n- Initial efficiency: starting % used before learned data exists.\n- Notifications/logbook: optionally record efficiency adjustments.\n- Control strategy:\n  - dab: uses the original airflow curve\n  - cost: uses a linear target with movement/open penalties\n  - stats: uses a learned linear model per vent\n  - hybrid: picks the lowest-cost target from all strategies",
+        "description": "Tune Dynamic Airflow Balancing (DAB) and polling behavior.\n\n**Core settings:** Use DAB, force manual mode, close inactive rooms, granularity, polling intervals, initial efficiency, notifications.\n\n**Control strategies:** dab (airflow curve), cost (linear + penalties), stats (learned model), hybrid (picks lowest-cost).\n\n**Tuning guide for movement reduction:**\n- deviation_threshold: Lower = more responsive but more moves. Default 0.5°C.\n- deadband: Higher = fewer moves but less precise. Default 15%.\n- max_recalc_per_cycle: Lower = more stable but less adaptive. Default 3.\n- max_adjustment_batches_per_cycle: Hard cap on adjustment bursts within one HVAC run. Default 3.\n- max_adjustment_batches_per_window: Hard cap on repeated adjustments across short cycling. Default 4.\n- adjustment_window_minutes: Rolling time window for the batch cap. Default 120 min.\n- temp_error_override: Higher = anti-chatter honored more often. Default 1.0°C.\n- min_adjustment_percent: Can be reduced if deadband is active. Default 10%.\n- min_adjustment_interval: Less important with steady-state hold. Default 30 min.",
         "data": {
           "dab_enabled": "Use Dynamic Airflow Balancing (automatic vent control)",
           "dab_force_manual": "Force vendor structure mode to manual while DAB is enabled",
@@ -68,15 +68,35 @@
           "initial_efficiency_percent": "Initial efficiency percent for new rooms",
           "notify_efficiency_changes": "Notify when efficiency values are adjusted",
           "log_efficiency_changes": "Write efficiency adjustments to the logbook",
-          "control_strategy": "Control strategy (dab, cost, stats, hybrid)",
+          "control_strategy": "Control strategy (dab, cost, stats, hybrid, balance)",
           "min_adjustment_percent": "Minimum vent change before adjusting (%)",
           "min_adjustment_interval": "Minimum minutes between vent adjustments",
-          "temp_error_override_c": "Temperature error (C) that overrides hold rules"
+          "temp_error_override_c": "Temperature error (C) that overrides hold rules",
+          "deadband_percent": "Position deadband (%) — don't move a vent if the new target is within this % of current position",
+          "deviation_threshold_c": "Deviation threshold (°C) — hold vent positions if room temps track within this tolerance",
+          "max_recalc_per_cycle": "Max recalculations per HVAC cycle before positions are locked",
+          "max_adjustment_batches_per_cycle": "Max vent adjustment batches per HVAC cycle",
+          "max_adjustment_batches_per_window": "Max vent adjustment batches in rolling window",
+          "adjustment_window_minutes": "Rolling window length for vent adjustment cap (minutes)",
+          "safety_floor_pct": "Airflow safety floor (%) — minimum combined open airflow the balance strategy will never drop below (20–90)",
+          "spread_guardrail_c": "Spread guardrail (°C) — hold positions while active-room spread is at or below this (0.2–5.0)",
+          "spread_improvement_deadband_c": "Spread improvement deadband (°C) — only move vents if predicted spread improves by at least this (0.0–2.0)",
+          "crosscoupling_enabled": "Cross-coupling — close satisfied rooms to feed an airflow-limited room",
+          "airflow_limited_margin_pct": "Airflow-limited margin (%) — how close to full open counts as pinned (0–20)",
+          "airflow_limited_error_c": "Airflow-limited error (°C) — minimum off-target error to flag a pinned room (0.1–3.0)",
+          "short_cycle_gap_min": "Short-cycle gap (minutes) — reuse the prior cycle anchor across idle gaps shorter than this (0–60)"
         }
       },
       "vent_assignments": {
         "title": "Vent assignments",
-        "description": "Assign a thermostat and (optionally) a temperature sensor for each vent. Found {vent_count} vents.\n\n- Thermostat: the HVAC system serving that vent.\n- Temperature sensor (optional): overrides room temperature for DAB.\n- If no sensor is selected, the vendor room temperature is used."
+        "description": "Assign a thermostat and (optionally) a temperature sensor and door/window sensor for each vent. Found {vent_count} vents.\n\n- Thermostat: the HVAC system serving that vent.\n- Temperature sensor (optional): overrides room temperature for DAB.\n- Door/Window sensor (optional): adjusts the room's learning context when open (e.g. doors-open heat exchange).\n- If no sensor is selected, the vendor room temperature is used."
+      },
+      "context_settings": {
+        "title": "Context sources",
+        "description": "Optional environmental sources that improve learning and balancing.\n\n- Outdoor temperature: a sensor (numeric °C/°F) or a weather entity. Used to pick the outdoor band (cold / mild / hot) for context-aware efficiency learning. Leave unset to default to the mild band.",
+        "data": {
+          "outdoor_temp_entity": "Outdoor temperature sensor or weather entity (optional)"
+        }
       },
       "conventional_vents": {
         "title": "Conventional vent counts",
@@ -95,6 +115,10 @@
         "data": {
           "manual_vent_count": "Number of vents"
         }
+      },
+      "manual_vents": {
+        "title": "Manual vent setup",
+        "description": "Provide a name, thermostat, and temperature sensor for each vent."
       }
     },
     "error": {

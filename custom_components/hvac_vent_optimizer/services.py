@@ -174,6 +174,9 @@ async def async_register_services(hass: HomeAssistant) -> None:
         if not structure_id:
             _LOGGER.error("Missing structure_id in config entry")
             return
+        if not coordinator.api:
+            _LOGGER.error("Flair API client not available for set_structure_mode")
+            return
         try:
             await coordinator.api.async_set_structure_mode(
                 structure_id, call.data[CONF_STRUCTURE_MODE]
@@ -203,6 +206,9 @@ async def async_register_services(hass: HomeAssistant) -> None:
             _LOGGER.error("Could not resolve room_id for setpoint service call")
             return
 
+        if not coordinator.api:
+            _LOGGER.error("Flair API client not available for set_room_setpoint")
+            return
         try:
             await coordinator.api.async_set_room_setpoint(
                 room_id,

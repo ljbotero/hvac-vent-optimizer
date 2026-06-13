@@ -82,8 +82,8 @@ class FlairRoomClimate(CoordinatorEntity, ClimateEntity):
         temperature = kwargs.get(ATTR_TEMPERATURE)
         if temperature is None:
             return
+        # Home Assistant converts the requested value into this entity's native
+        # unit (Celsius) before calling us, so pass it straight to Flair.
         temp_c = float(temperature)
-        if self.hass.config.units.temperature_unit == UnitOfTemperature.FAHRENHEIT:
-            temp_c = (temp_c - 32) * 5 / 9
         await self.coordinator.api.async_set_room_setpoint(self._room_id, temp_c)
         await self.coordinator.async_request_refresh()

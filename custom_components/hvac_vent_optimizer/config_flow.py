@@ -11,49 +11,84 @@ from homeassistant.helpers import aiohttp_client, selector
 
 from .api import FlairApi, FlairApiAuthError, FlairApiError
 from .const import (
+    AIRFLOW_LIMITED_ERROR_C_RANGE,
+    AIRFLOW_LIMITED_MARGIN_PCT_RANGE,
     BRAND_FLAIR,
     BRAND_MANUAL,
+    CONF_ADJUSTMENT_WINDOW_MINUTES,
+    CONF_AIRFLOW_LIMITED_ERROR_C,
+    CONF_AIRFLOW_LIMITED_MARGIN_PCT,
     CONF_CLIENT_ID,
     CONF_CLIENT_SECRET,
     CONF_CLOSE_INACTIVE_ROOMS,
+    CONF_CONTROL_STRATEGY,
     CONF_CONVENTIONAL_VENTS_BY_THERMOSTAT,
+    CONF_CROSSCOUPLING_ENABLED,
     CONF_DAB_ENABLED,
     CONF_DAB_FORCE_MANUAL,
+    CONF_DEADBAND_PERCENT,
+    CONF_DEVIATION_THRESHOLD,
+    CONF_DOOR_SENSOR_ENTITY,
     CONF_INITIAL_EFFICIENCY_PERCENT,
-    CONF_NOTIFY_EFFICIENCY_CHANGES,
     CONF_LOG_EFFICIENCY_CHANGES,
-    CONF_CONTROL_STRATEGY,
-    CONF_MIN_ADJUSTMENT_PERCENT,
+    CONF_MANUAL_VENT_COUNT,
+    CONF_MANUAL_VENTS,
+    CONF_MAX_ADJUSTMENT_BATCHES_PER_CYCLE,
+    CONF_MAX_ADJUSTMENT_BATCHES_PER_WINDOW,
+    CONF_MAX_RECALC_PER_CYCLE,
     CONF_MIN_ADJUSTMENT_INTERVAL,
-    CONF_TEMP_ERROR_OVERRIDE,
+    CONF_MIN_ADJUSTMENT_PERCENT,
+    CONF_NOTIFY_EFFICIENCY_CHANGES,
+    CONF_OUTDOOR_TEMP_ENTITY,
     CONF_POLL_INTERVAL_ACTIVE,
     CONF_POLL_INTERVAL_IDLE,
+    CONF_SAFETY_FLOOR_PCT,
+    CONF_SHORT_CYCLE_GAP_MIN,
+    CONF_SPREAD_GUARDRAIL_C,
+    CONF_SPREAD_IMPROVEMENT_DEADBAND_C,
     CONF_STRUCTURE_ID,
     CONF_STRUCTURE_NAME,
+    CONF_TEMP_ERROR_OVERRIDE,
     CONF_TEMP_SENSOR_ENTITY,
     CONF_THERMOSTAT_ENTITY,
     CONF_VENT_ASSIGNMENTS,
     CONF_VENT_BRAND,
     CONF_VENT_GRANULARITY,
-    CONF_MANUAL_VENT_COUNT,
-    CONF_MANUAL_VENTS,
+    CONTROL_STRATEGIES,
+    DEFAULT_ADJUSTMENT_WINDOW_MINUTES,
+    DEFAULT_AIRFLOW_LIMITED_ERROR_C,
+    DEFAULT_AIRFLOW_LIMITED_MARGIN_PCT,
     DEFAULT_CLOSE_INACTIVE_ROOMS,
+    DEFAULT_CONTROL_STRATEGY,
     DEFAULT_CONVENTIONAL_VENTS,
+    DEFAULT_CROSSCOUPLING_ENABLED,
     DEFAULT_DAB_ENABLED,
     DEFAULT_DAB_FORCE_MANUAL,
-    DEFAULT_MANUAL_VENT_COUNT,
+    DEFAULT_DEADBAND_PERCENT,
+    DEFAULT_DEVIATION_THRESHOLD,
     DEFAULT_INITIAL_EFFICIENCY_PERCENT,
-    DEFAULT_NOTIFY_EFFICIENCY_CHANGES,
     DEFAULT_LOG_EFFICIENCY_CHANGES,
-    DEFAULT_CONTROL_STRATEGY,
-    DEFAULT_MIN_ADJUSTMENT_PERCENT,
+    DEFAULT_MANUAL_VENT_COUNT,
+    DEFAULT_MAX_ADJUSTMENT_BATCHES_PER_CYCLE,
+    DEFAULT_MAX_ADJUSTMENT_BATCHES_PER_WINDOW,
+    DEFAULT_MAX_RECALC_PER_CYCLE,
     DEFAULT_MIN_ADJUSTMENT_INTERVAL,
-    DEFAULT_TEMP_ERROR_OVERRIDE,
+    DEFAULT_MIN_ADJUSTMENT_PERCENT,
+    DEFAULT_NOTIFY_EFFICIENCY_CHANGES,
     DEFAULT_POLL_INTERVAL_ACTIVE,
     DEFAULT_POLL_INTERVAL_IDLE,
+    DEFAULT_SAFETY_FLOOR_PCT,
+    DEFAULT_SHORT_CYCLE_GAP_MIN,
+    DEFAULT_SPREAD_GUARDRAIL_C,
+    DEFAULT_SPREAD_IMPROVEMENT_DEADBAND_C,
+    DEFAULT_TEMP_ERROR_OVERRIDE,
     DEFAULT_VENT_GRANULARITY,
     DOMAIN,
     MAX_CONVENTIONAL_VENTS,
+    SAFETY_FLOOR_PCT_RANGE,
+    SHORT_CYCLE_GAP_MIN_RANGE,
+    SPREAD_GUARDRAIL_C_RANGE,
+    SPREAD_IMPROVEMENT_DEADBAND_C_RANGE,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -62,7 +97,10 @@ _LOGGER = logging.getLogger(__name__)
 class HvacVentOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for HVAC Vent Optimizer."""
 
-    VERSION = 1
+    # v2 (Task 27): the default control strategy flips to ``balance``. The bump
+    # lets ``async_migrate_entry`` preserve pre-``balance`` installs (R17.3)
+    # while new (v2) entries fall through to the new default (R16.1/R17.1).
+    VERSION = 2
 
     def __init__(self) -> None:
         self._client_id: str | None = None
@@ -127,7 +165,7 @@ class HvacVentOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     errors["base"] = "server_error"
                 else:
                     errors["base"] = "cannot_connect"
-            except Exception as err:  # noqa: BLE001 - surface unexpected errors
+            except Exception as err:
                 _LOGGER.exception("Unexpected error during auth: %s", err)
                 errors["base"] = "unknown"
             else:
@@ -282,6 +320,7 @@ class HvacVentOptimizerOptionsFlow(config_entries.OptionsFlowWithConfigEntry):
         self._thermostat_key_map: dict[str, str] = {}
         self._vent_key_map: dict[str, str] = {}
         self._temp_sensor_key_map: dict[str, str] = {}
+        self._door_sensor_key_map: dict[str, str] = {}
         self._manual_vent_count: int | None = None
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None):
@@ -293,6 +332,7 @@ class HvacVentOptimizerOptionsFlow(config_entries.OptionsFlowWithConfigEntry):
             "brand_manual": "Vent Brand & Manual Setup",
             "algorithm_settings": "Dynamic Airflow Balancing & Polling",
             "conventional_vents": "Conventional Vent Counts (Airflow Safety)",
+            "context_settings": "Context Sources (Outdoor Temperature)",
         }
         if brand == BRAND_FLAIR:
             menu_options["vent_assignments"] = "Thermostat & Sensor Assignments"
@@ -450,6 +490,61 @@ class HvacVentOptimizerOptionsFlow(config_entries.OptionsFlowWithConfigEntry):
                     CONF_MIN_ADJUSTMENT_PERCENT: user_input[CONF_MIN_ADJUSTMENT_PERCENT],
                     CONF_MIN_ADJUSTMENT_INTERVAL: user_input[CONF_MIN_ADJUSTMENT_INTERVAL],
                     CONF_TEMP_ERROR_OVERRIDE: user_input[CONF_TEMP_ERROR_OVERRIDE],
+                    CONF_DEADBAND_PERCENT: user_input[CONF_DEADBAND_PERCENT],
+                    CONF_DEVIATION_THRESHOLD: user_input[CONF_DEVIATION_THRESHOLD],
+                    CONF_MAX_RECALC_PER_CYCLE: user_input[CONF_MAX_RECALC_PER_CYCLE],
+                    CONF_MAX_ADJUSTMENT_BATCHES_PER_CYCLE: user_input[
+                        CONF_MAX_ADJUSTMENT_BATCHES_PER_CYCLE
+                    ],
+                    CONF_MAX_ADJUSTMENT_BATCHES_PER_WINDOW: user_input[
+                        CONF_MAX_ADJUSTMENT_BATCHES_PER_WINDOW
+                    ],
+                    CONF_ADJUSTMENT_WINDOW_MINUTES: user_input[
+                        CONF_ADJUSTMENT_WINDOW_MINUTES
+                    ],
+                    # New balance (DAB v2) tunables — clamped to documented
+                    # ranges (R18.2) so a bad value can never reach the allocator.
+                    CONF_SAFETY_FLOOR_PCT: _clamp_int(
+                        user_input.get(CONF_SAFETY_FLOOR_PCT),
+                        SAFETY_FLOOR_PCT_RANGE[0],
+                        SAFETY_FLOOR_PCT_RANGE[1],
+                        DEFAULT_SAFETY_FLOOR_PCT,
+                    ),
+                    CONF_SPREAD_GUARDRAIL_C: _clamp_float(
+                        user_input.get(CONF_SPREAD_GUARDRAIL_C),
+                        SPREAD_GUARDRAIL_C_RANGE[0],
+                        SPREAD_GUARDRAIL_C_RANGE[1],
+                        DEFAULT_SPREAD_GUARDRAIL_C,
+                    ),
+                    CONF_SPREAD_IMPROVEMENT_DEADBAND_C: _clamp_float(
+                        user_input.get(CONF_SPREAD_IMPROVEMENT_DEADBAND_C),
+                        SPREAD_IMPROVEMENT_DEADBAND_C_RANGE[0],
+                        SPREAD_IMPROVEMENT_DEADBAND_C_RANGE[1],
+                        DEFAULT_SPREAD_IMPROVEMENT_DEADBAND_C,
+                    ),
+                    CONF_CROSSCOUPLING_ENABLED: bool(
+                        user_input.get(
+                            CONF_CROSSCOUPLING_ENABLED, DEFAULT_CROSSCOUPLING_ENABLED
+                        )
+                    ),
+                    CONF_AIRFLOW_LIMITED_MARGIN_PCT: _clamp_int(
+                        user_input.get(CONF_AIRFLOW_LIMITED_MARGIN_PCT),
+                        AIRFLOW_LIMITED_MARGIN_PCT_RANGE[0],
+                        AIRFLOW_LIMITED_MARGIN_PCT_RANGE[1],
+                        DEFAULT_AIRFLOW_LIMITED_MARGIN_PCT,
+                    ),
+                    CONF_AIRFLOW_LIMITED_ERROR_C: _clamp_float(
+                        user_input.get(CONF_AIRFLOW_LIMITED_ERROR_C),
+                        AIRFLOW_LIMITED_ERROR_C_RANGE[0],
+                        AIRFLOW_LIMITED_ERROR_C_RANGE[1],
+                        DEFAULT_AIRFLOW_LIMITED_ERROR_C,
+                    ),
+                    CONF_SHORT_CYCLE_GAP_MIN: _clamp_int(
+                        user_input.get(CONF_SHORT_CYCLE_GAP_MIN),
+                        SHORT_CYCLE_GAP_MIN_RANGE[0],
+                        SHORT_CYCLE_GAP_MIN_RANGE[1],
+                        DEFAULT_SHORT_CYCLE_GAP_MIN,
+                    ),
                 }
             )
             return self.async_create_entry(title="", data=options)
@@ -523,7 +618,7 @@ class HvacVentOptimizerOptionsFlow(config_entries.OptionsFlowWithConfigEntry):
                         ),
                     ): selector.SelectSelector(
                         selector.SelectSelectorConfig(
-                            options=["dab", "cost", "stats", "hybrid"],
+                            options=list(CONTROL_STRATEGIES),
                             mode=selector.SelectSelectorMode.DROPDOWN,
                         )
                     ),
@@ -548,6 +643,163 @@ class HvacVentOptimizerOptionsFlow(config_entries.OptionsFlowWithConfigEntry):
                             DEFAULT_TEMP_ERROR_OVERRIDE,
                         ),
                     ): vol.All(vol.Coerce(float), vol.Range(min=0, max=5)),
+                    vol.Required(
+                        CONF_DEADBAND_PERCENT,
+                        default=options.get(
+                            CONF_DEADBAND_PERCENT,
+                            DEFAULT_DEADBAND_PERCENT,
+                        ),
+                    ): vol.All(vol.Coerce(int), vol.Range(min=0, max=50)),
+                    vol.Required(
+                        CONF_DEVIATION_THRESHOLD,
+                        default=options.get(
+                            CONF_DEVIATION_THRESHOLD,
+                            DEFAULT_DEVIATION_THRESHOLD,
+                        ),
+                    ): vol.All(vol.Coerce(float), vol.Range(min=0.1, max=2.0)),
+                    vol.Required(
+                        CONF_MAX_RECALC_PER_CYCLE,
+                        default=options.get(
+                            CONF_MAX_RECALC_PER_CYCLE,
+                            DEFAULT_MAX_RECALC_PER_CYCLE,
+                        ),
+                    ): vol.All(vol.Coerce(int), vol.Range(min=1, max=10)),
+                    vol.Required(
+                        CONF_MAX_ADJUSTMENT_BATCHES_PER_CYCLE,
+                        default=options.get(
+                            CONF_MAX_ADJUSTMENT_BATCHES_PER_CYCLE,
+                            DEFAULT_MAX_ADJUSTMENT_BATCHES_PER_CYCLE,
+                        ),
+                    ): vol.All(vol.Coerce(int), vol.Range(min=1, max=10)),
+                    vol.Required(
+                        CONF_MAX_ADJUSTMENT_BATCHES_PER_WINDOW,
+                        default=options.get(
+                            CONF_MAX_ADJUSTMENT_BATCHES_PER_WINDOW,
+                            DEFAULT_MAX_ADJUSTMENT_BATCHES_PER_WINDOW,
+                        ),
+                    ): vol.All(vol.Coerce(int), vol.Range(min=1, max=20)),
+                    vol.Required(
+                        CONF_ADJUSTMENT_WINDOW_MINUTES,
+                        default=options.get(
+                            CONF_ADJUSTMENT_WINDOW_MINUTES,
+                            DEFAULT_ADJUSTMENT_WINDOW_MINUTES,
+                        ),
+                    ): vol.All(vol.Coerce(int), vol.Range(min=5, max=720)),
+                    vol.Required(
+                        CONF_SAFETY_FLOOR_PCT,
+                        default=options.get(
+                            CONF_SAFETY_FLOOR_PCT, DEFAULT_SAFETY_FLOOR_PCT
+                        ),
+                    ): vol.All(
+                        vol.Coerce(int),
+                        vol.Range(
+                            min=SAFETY_FLOOR_PCT_RANGE[0], max=SAFETY_FLOOR_PCT_RANGE[1]
+                        ),
+                    ),
+                    vol.Required(
+                        CONF_SPREAD_GUARDRAIL_C,
+                        default=options.get(
+                            CONF_SPREAD_GUARDRAIL_C, DEFAULT_SPREAD_GUARDRAIL_C
+                        ),
+                    ): vol.All(
+                        vol.Coerce(float),
+                        vol.Range(
+                            min=SPREAD_GUARDRAIL_C_RANGE[0],
+                            max=SPREAD_GUARDRAIL_C_RANGE[1],
+                        ),
+                    ),
+                    vol.Required(
+                        CONF_SPREAD_IMPROVEMENT_DEADBAND_C,
+                        default=options.get(
+                            CONF_SPREAD_IMPROVEMENT_DEADBAND_C,
+                            DEFAULT_SPREAD_IMPROVEMENT_DEADBAND_C,
+                        ),
+                    ): vol.All(
+                        vol.Coerce(float),
+                        vol.Range(
+                            min=SPREAD_IMPROVEMENT_DEADBAND_C_RANGE[0],
+                            max=SPREAD_IMPROVEMENT_DEADBAND_C_RANGE[1],
+                        ),
+                    ),
+                    vol.Required(
+                        CONF_CROSSCOUPLING_ENABLED,
+                        default=options.get(
+                            CONF_CROSSCOUPLING_ENABLED, DEFAULT_CROSSCOUPLING_ENABLED
+                        ),
+                    ): bool,
+                    vol.Required(
+                        CONF_AIRFLOW_LIMITED_MARGIN_PCT,
+                        default=options.get(
+                            CONF_AIRFLOW_LIMITED_MARGIN_PCT,
+                            DEFAULT_AIRFLOW_LIMITED_MARGIN_PCT,
+                        ),
+                    ): vol.All(
+                        vol.Coerce(int),
+                        vol.Range(
+                            min=AIRFLOW_LIMITED_MARGIN_PCT_RANGE[0],
+                            max=AIRFLOW_LIMITED_MARGIN_PCT_RANGE[1],
+                        ),
+                    ),
+                    vol.Required(
+                        CONF_AIRFLOW_LIMITED_ERROR_C,
+                        default=options.get(
+                            CONF_AIRFLOW_LIMITED_ERROR_C,
+                            DEFAULT_AIRFLOW_LIMITED_ERROR_C,
+                        ),
+                    ): vol.All(
+                        vol.Coerce(float),
+                        vol.Range(
+                            min=AIRFLOW_LIMITED_ERROR_C_RANGE[0],
+                            max=AIRFLOW_LIMITED_ERROR_C_RANGE[1],
+                        ),
+                    ),
+                    vol.Required(
+                        CONF_SHORT_CYCLE_GAP_MIN,
+                        default=options.get(
+                            CONF_SHORT_CYCLE_GAP_MIN, DEFAULT_SHORT_CYCLE_GAP_MIN
+                        ),
+                    ): vol.All(
+                        vol.Coerce(int),
+                        vol.Range(
+                            min=SHORT_CYCLE_GAP_MIN_RANGE[0],
+                            max=SHORT_CYCLE_GAP_MIN_RANGE[1],
+                        ),
+                    ),
+                }
+            ),
+            errors=errors,
+        )
+
+    async def async_step_context_settings(self, user_input: dict[str, Any] | None = None):
+        """Context sources step (R12.5): optional outdoor-temperature entity.
+
+        A ``sensor.*`` (numeric outdoor temperature) or a ``weather.*`` entity is
+        accepted. Leaving it unset is valid — the outdoor band degrades to
+        ``mild`` and context multipliers default to 1.0.
+        """
+        errors: dict[str, str] = {}
+        options = dict(self.config_entry.options)
+
+        if user_input is not None:
+            entity = user_input.get(CONF_OUTDOOR_TEMP_ENTITY)
+            if entity:
+                options[CONF_OUTDOOR_TEMP_ENTITY] = entity
+            else:
+                options.pop(CONF_OUTDOOR_TEMP_ENTITY, None)
+            return self.async_create_entry(title="", data=options)
+
+        current = options.get(CONF_OUTDOOR_TEMP_ENTITY)
+        outdoor_selector = selector.EntitySelector(
+            selector.EntitySelectorConfig(domain=["sensor", "weather"])
+        )
+        return self.async_show_form(
+            step_id="context_settings",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(
+                        CONF_OUTDOOR_TEMP_ENTITY,
+                        default=current,
+                    ): outdoor_selector,
                 }
             ),
             errors=errors,
@@ -560,7 +812,7 @@ class HvacVentOptimizerOptionsFlow(config_entries.OptionsFlowWithConfigEntry):
         if not self._vents:
             try:
                 self._vents = await self._async_get_vents()
-            except Exception as err:  # noqa: BLE001
+            except Exception as err:
                 _LOGGER.exception("Failed to load vents: %s", err)
                 errors["base"] = "cannot_connect"
                 self._vents = []
@@ -577,10 +829,15 @@ class HvacVentOptimizerOptionsFlow(config_entries.OptionsFlowWithConfigEntry):
                     (key for key, mapped_id in self._temp_sensor_key_map.items() if mapped_id == vent_id),
                     f"{vent_id}_temp_sensor",
                 )
+                door_sensor_key = next(
+                    (key for key, mapped_id in self._door_sensor_key_map.items() if mapped_id == vent_id),
+                    f"{vent_id}_door_sensor",
+                )
                 assignments[vent_id] = {
                     "vent_name": vent["name"],
                     CONF_THERMOSTAT_ENTITY: user_input[thermostat_key],
                     CONF_TEMP_SENSOR_ENTITY: user_input.get(temp_sensor_key),
+                    CONF_DOOR_SENSOR_ENTITY: user_input.get(door_sensor_key),
                 }
 
             options[CONF_VENT_ASSIGNMENTS] = assignments
@@ -590,12 +847,19 @@ class HvacVentOptimizerOptionsFlow(config_entries.OptionsFlowWithConfigEntry):
         data_schema: dict[Any, Any] = {}
         self._vent_key_map = {}
         self._temp_sensor_key_map = {}
+        self._door_sensor_key_map = {}
 
         thermostat_selector = selector.EntitySelector(
             selector.EntitySelectorConfig(domain="climate")
         )
         temp_sensor_selector = selector.EntitySelector(
             selector.EntitySelectorConfig(domain="sensor", device_class="temperature")
+        )
+        door_sensor_selector = selector.EntitySelector(
+            selector.EntitySelectorConfig(
+                domain="binary_sensor",
+                device_class=["door", "garage_door", "opening", "window"],
+            )
         )
 
         for vent in self._vents:
@@ -605,21 +869,38 @@ class HvacVentOptimizerOptionsFlow(config_entries.OptionsFlowWithConfigEntry):
 
             thermostat_key = f"{vent_name} ({vent_id}) - Thermostat"
             temp_sensor_key = f"{vent_name} ({vent_id}) - Temperature Sensor (optional)"
+            door_sensor_key = f"{vent_name} ({vent_id}) - Door/Window Sensor (optional)"
             self._vent_key_map[thermostat_key] = vent_id
             self._temp_sensor_key_map[temp_sensor_key] = vent_id
+            self._door_sensor_key_map[door_sensor_key] = vent_id
 
-            data_schema[
-                vol.Required(
-                    thermostat_key,
-                    default=assignment.get(CONF_THERMOSTAT_ENTITY),
-                )
-            ] = thermostat_selector
-            data_schema[
-                vol.Optional(
-                    temp_sensor_key,
-                    default=assignment.get(CONF_TEMP_SENSOR_ENTITY),
-                )
-            ] = temp_sensor_selector
+            # Use suggested_value (not default) for entity selectors so that empty
+            # optional fields submit as absent rather than None — an EntitySelector
+            # rejects None with "Entity None is neither a valid entity ID nor a valid
+            # UUID". suggested_value pre-fills without forcing a value and stays clearable.
+            thermostat_val = assignment.get(CONF_THERMOSTAT_ENTITY)
+            temp_val = assignment.get(CONF_TEMP_SENSOR_ENTITY)
+            door_val = assignment.get(CONF_DOOR_SENSOR_ENTITY)
+
+            thermostat_marker = (
+                vol.Required(thermostat_key, description={"suggested_value": thermostat_val})
+                if thermostat_val
+                else vol.Required(thermostat_key)
+            )
+            temp_marker = (
+                vol.Optional(temp_sensor_key, description={"suggested_value": temp_val})
+                if temp_val
+                else vol.Optional(temp_sensor_key)
+            )
+            door_marker = (
+                vol.Optional(door_sensor_key, description={"suggested_value": door_val})
+                if door_val
+                else vol.Optional(door_sensor_key)
+            )
+
+            data_schema[thermostat_marker] = thermostat_selector
+            data_schema[temp_marker] = temp_sensor_selector
+            data_schema[door_marker] = door_sensor_selector
 
         return self.async_show_form(
             step_id="vent_assignments",
@@ -686,3 +967,31 @@ class HvacVentOptimizerOptionsFlow(config_entries.OptionsFlowWithConfigEntry):
 
 def _safe_key(prefix: str, entity_id: str) -> str:
     return f"{prefix}_{entity_id}".replace(".", "_")
+
+
+def _clamp_int(value: Any, lo: int, hi: int, default: int) -> int:
+    """Coerce ``value`` to an int clamped to ``[lo, hi]`` (R18.2).
+
+    Non-numeric / unparsable input falls back to ``default`` rather than raising,
+    so a malformed option can never crash the flow or escape the safe band.
+    """
+    try:
+        ivalue = int(round(float(value)))
+    except (TypeError, ValueError):
+        return default
+    return max(lo, min(hi, ivalue))
+
+
+def _clamp_float(value: Any, lo: float, hi: float, default: float) -> float:
+    """Coerce ``value`` to a float clamped to ``[lo, hi]`` (R18.2).
+
+    Rejects non-numeric input and NaN (which compares false to everything),
+    falling back to ``default``.
+    """
+    try:
+        fvalue = float(value)
+    except (TypeError, ValueError):
+        return default
+    if fvalue != fvalue:  # NaN
+        return default
+    return max(lo, min(hi, fvalue))

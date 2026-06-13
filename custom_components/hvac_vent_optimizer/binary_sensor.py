@@ -10,10 +10,24 @@ from .const import DOMAIN
 async def async_setup_entry(hass, entry, async_add_entities):
     coordinator = hass.data[DOMAIN][entry.entry_id]
     pucks = coordinator.data.get("pucks", {}) if coordinator.data else {}
-    entities = [
+    vents = coordinator.data.get("vents", {}) if coordinator.data else {}
+    entities: list[BinarySensorEntity] = [
         FlairPuckOccupancyBinarySensor(coordinator, entry.entry_id, puck_id)
         for puck_id in pucks.keys()
     ]
+
+    # Per-room airflow-limited indicator (R5.4). One per room served by a vent.
+    rooms: dict[str, dict] = {}
+    for vent in vents.values():
+        room = vent.get("room") or {}
+        room_id = room.get("id")
+        if room_id and room_id not in rooms:
+            rooms[room_id] = room
+    for room_id in rooms:
+        entities.append(
+            FlairRoomAirflowLimitedBinarySensor(coordinator, entry.entry_id, room_id)
+        )
+
     async_add_entities(entities)
 
 
@@ -65,3 +79,35 @@ class FlairPuckOccupancyBinarySensor(CoordinatorEntity, BinarySensorEntity):
         if isinstance(value, str):
             return value.lower() in {"true", "occupied", "1"}
         return bool(value)
+
+
+class FlairRoomAirflowLimitedBinarySensor(CoordinatorEntity, BinarySensorEntity):
+    """Per-room airflow-limited indicator (R5.4).
+
+    ``on`` when the room's vent is at/near full open yet still off-target, i.e.
+    opening it further cannot improve it. Sourced from the coordinator's
+    per-poll observability state (Task 24).
+    """
+
+    def __init__(self, coordinator, entry_id: str, room_id: str) -> None:
+        super().__init__(coordinator)
+        self._entry_id = entry_id
+        self._room_id = room_id
+        self._attr_unique_id = f"{entry_id}_room_{room_id}_airflow_limited"
+        self._attr_device_class = BinarySensorDeviceClass.PROBLEM
+        self._attr_icon = "mdi:fan-alert"
+
+    @property
+    def name(self):
+        room = self.coordinator.get_room_by_id(self._room_id)
+        room_name = (room.get("attributes") or {}).get("name") or f"Room {self._room_id}"
+        return f"{room_name} Airflow Limited"
+
+    @property
+    def device_info(self):
+        room = self.coordinator.get_room_by_id(self._room_id)
+        return self.coordinator.get_room_device_info(room)
+
+    @property
+    def is_on(self):
+        return self.coordinator.is_room_airflow_limited(self._room_id)

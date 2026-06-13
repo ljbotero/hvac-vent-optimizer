@@ -40,12 +40,7 @@ def round_big_decimal(value: float, scale: int = 3) -> float:
 def round_to_nearest_multiple(value: float, granularity: int) -> int:
     if granularity <= 0:
         return int(round(value))
-    quotient = value / granularity
-    if quotient >= 0:
-        rounded = math.floor(quotient + 0.5)
-    else:
-        rounded = math.ceil(quotient - 0.5)
-    return int(rounded * granularity)
+    return int(round(value / granularity)) * granularity
 
 
 def rolling_average(current_average: float | None, new_number: float, weight: float = 1, num_entries: int = 10) -> float:
@@ -158,6 +153,13 @@ def calculate_open_percentage_for_all_vents(
         rate = float(state_val.get("rate", 0) or 0)
 
         if close_inactive and not active:
+            percentage_open = 0.0
+        elif has_room_reached_setpoint(
+            hvac_mode, setpoint, float(state_val.get("temp", 0) or 0)
+        ):
+            # Directional overshoot guard (R8): a room already past the setpoint
+            # is satisfied and must close, even when its learned rate is below
+            # the detection floor (which would otherwise force it wide open).
             percentage_open = 0.0
         elif rate < settings.min_temp_change_rate:
             percentage_open = 100.0

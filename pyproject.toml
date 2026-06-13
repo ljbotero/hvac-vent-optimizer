@@ -1,0 +1,123 @@
+# Tooling configuration for the HVAC Vent Optimizer custom integration.
+#
+# This file configures the quality gates (ruff / black / mypy) introduced in
+# Task 2 of the hvac-vent-balancing spec. It is tooling-only: it intentionally
+# does NOT declare a [project]/build-system table because this directory is a
+# Home Assistant *custom component* package (loaded by HA as
+# `custom_components.hvac_vent_optimizer`), not a standalone distributable.
+#
+# Python target: see docs/quality-baseline.md. The integration runtime tracks
+# Home Assistant Core's Python (AGENTS.md: 3.14+). The lint/format target floor
+# is pinned to py313 below because that is the highest version the pinned black
+# release understands; targeting a slightly older interpreter is conservative
+# and safe (it never emits syntax newer than the floor). The new pure modules
+# (balance.py, learning.py, context.py, simulator.py) import no Home Assistant
+# and are version-agnostic.
+
+# ---------------------------------------------------------------------------
+# Ruff — linter (HA-friendly rule set)
+# ---------------------------------------------------------------------------
+[tool.ruff]
+target-version = "py313"
+line-length = 110            # matches .editorconfig [*.py] max_line_length
+extend-exclude = [
+    "tests/.pytest_cache",
+    "__pycache__",
+]
+
+[tool.ruff.lint]
+# A pragmatic, Home-Assistant-flavored selection: correctness (E/W/F),
+# import hygiene (I), modern syntax (UP), common bug classes (B/C4/SIM/PIE),
+# async safety (ASYNC), logging correctness (LOG), tidy imports (TID),
+# blind-except awareness (BLE — see note below), and Ruff's own checks (RUF).
+select = [
+    "E",     # pycodestyle errors
+    "W",     # pycodestyle warnings
+    "F",     # pyflakes
+    "I",     # isort
+    "UP",    # pyupgrade
+    "B",     # flake8-bugbear
+    "C4",    # flake8-comprehensions
+    "SIM",   # flake8-simplify
+    "PIE",   # flake8-pie
+    "TID",   # flake8-tidy-imports
+    "ASYNC", # flake8-async (no blocking calls in async — see AGENTS.md)
+    "LOG",   # flake8-logging
+    "BLE",   # flake8-blind-except
+    "RUF",   # ruff-specific rules
+]
+# The component intentionally uses broad `except Exception` at service/update
+# boundaries to surface errors as HA notifications rather than crash (see
+# AGENTS.md "Error handling"). Those sites carry `# noqa: BLE001`; selecting
+# BLE above keeps those suppressions meaningful instead of dead noqa comments.
+ignore = [
+    "SIM105", # contextlib.suppress is not always clearer than try/except/pass
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["hvac_vent_optimizer", "custom_components"]
+combine-as-imports = true
+
+[tool.ruff.lint.per-file-ignores]
+# Tests deliberately reach into private (`_`-prefixed) coordinator internals
+# and inject stub modules; relax the rules that would fight that on purpose.
+"tests/**" = [
+    "BLE001", # tests may assert on broad failure paths
+    "SIM",    # readability of explicit test setup beats simplification
+]
+
+# ---------------------------------------------------------------------------
+# Black — formatter
+# ---------------------------------------------------------------------------
+[tool.black]
+line-length = 110            # matches .editorconfig / ruff line-length
+target-version = ["py313"]   # highest target the pinned black release supports
+
+# ---------------------------------------------------------------------------
+# Mypy — type checker (permissive baseline, strict on the new pure modules)
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.13"
+# Permissive starting point for the existing HA-coupled code. Home Assistant,
+# aiohttp and voluptuous are not installed in the lint/test environment (the
+# test harness stubs them — see tests/conftest.py), so missing imports must be
+# ignored globally to keep the baseline runnable.
+ignore_missing_imports = true
+warn_unused_configs = true
+warn_redundant_casts = true
+show_error_codes = true
+namespace_packages = true
+explicit_package_bases = true
+exclude = [
+    '^tests/\.pytest_cache/',
+]
+
+# Be explicit (and future-proof) that HA's namespace never needs stubs.
+[[tool.mypy.overrides]]
+module = ["homeassistant.*", "aiohttp.*", "voluptuous.*"]
+ignore_missing_imports = true
+
+# Strict typing on the NEW pure modules. They have no Home Assistant
+# dependency, so they can (and must) be held to a high bar from day one.
+# Both the bare module names (when checked from inside the package dir) and the
+# package-qualified names (when checked as `hvac_vent_optimizer.<mod>`) are
+# listed so the strict rules apply however mypy is invoked.
+[[tool.mypy.overrides]]
+module = [
+    "balance",
+    "learning",
+    "context",
+    "simulator",
+    "hvac_vent_optimizer.balance",
+    "hvac_vent_optimizer.learning",
+    "hvac_vent_optimizer.context",
+    "hvac_vent_optimizer.simulator",
+]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+disallow_untyped_calls = true
+check_untyped_defs = true
+no_implicit_optional = true
+warn_return_any = true
+warn_unused_ignores = true
+strict_equality = true
