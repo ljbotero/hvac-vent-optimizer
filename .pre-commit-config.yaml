@@ -7,6 +7,16 @@
 # the CI check, and local `ruff`/`black`/`mypy` invocations stay in lockstep.
 # Hook revisions are pinned to the versions validated locally in Task 2.
 repos:
+  # Encoding / syntax guards. fix-byte-order-marker strips a leading UTF-8 BOM
+  # (U+FEFF) — a BOM is tolerated by Python <=3.13 but is a hard SyntaxError on
+  # Python 3.14, which the hassfest CI image uses, so it must never be committed.
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: fix-byte-order-marker
+      - id: check-ast
+      - id: check-json
+
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.15.16
     hooks:

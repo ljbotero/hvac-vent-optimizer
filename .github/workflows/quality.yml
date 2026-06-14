@@ -50,6 +50,25 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements_test.txt
 
+      # --- Hard gate: encoding guard ---
+      # A leading UTF-8 BOM (U+FEFF) is tolerated by Python <=3.13 but is a
+      # SyntaxError on Python 3.14 (used by the hassfest image), so it slips
+      # past ruff/black/mypy/pytest here yet breaks Hassfest. This check is
+      # version-independent (inspects the raw first bytes) and blocking.
+      - name: Reject UTF-8 BOM in Python files
+        run: |
+          python - <<'PY'
+          import subprocess, sys
+          files = subprocess.check_output(["git", "ls-files", "*.py"]).decode().split()
+          bad = [f for f in files if open(f, "rb").read(3) == b"\xef\xbb\xbf"]
+          if bad:
+              print("::error::UTF-8 BOM found; strip it (Python 3.14 / hassfest reject it):")
+              for f in bad:
+                  print("  -", f)
+              sys.exit(1)
+          print(f"OK: no BOM in {len(files)} Python files.")
+          PY
+
       # --- Lint / format / type gates (report-only against the baseline) ---
       - name: Ruff (lint)
         continue-on-error: true
