@@ -273,6 +273,10 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._total_active_polls: int = 0
         # --- Task 24 observability state (R13/R14/R5.4) ----------------------
         # Recomputed every active poll by :meth:`_update_active_observability`.
+        # ``_active_observability_ready`` stays False until the first active
+        # conditioning poll computes real values, so the spread/error sensors
+        # report ``unknown`` (not a misleading 0.0) after a restart or while idle.
+        self._active_observability_ready: bool = False
         self._last_max_active_error: float = 0.0
         self._room_signed_errors: dict[str, float] = {}
         self._airflow_limited_rooms: set[str] = set()
@@ -2598,6 +2602,9 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._room_signed_errors = signed_errors
         self._airflow_limited_rooms = airflow_rooms
         self._airflow_limited_vents = airflow_vents
+        # A real active poll has now produced values; the spread/error sensors
+        # may report them (before this they stay ``unknown`` rather than 0.0).
+        self._active_observability_ready = True
         self._record_spread_metrics(control_strategy, spread, settings.spread_guardrail_c)
 
     def _record_spread_metrics(self, strategy: str, spread: float, guardrail_c: float) -> None:
@@ -3619,12 +3626,25 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return round(100.0 * self._hold_count / self._total_active_polls, 1)
 
     # --- Task 24 observability getters (R13/R14/R5.4/R25.11) ---------------
-    def get_active_room_spread(self) -> float:
-        """Current active-room temperature spread in °C (R13.1/R13.2)."""
+    def get_active_room_spread(self) -> float | None:
+        """Current active-room temperature spread in °C (R13.1/R13.2).
+
+        Returns ``None`` until the first active conditioning poll has computed a
+        real value, so the sensor reports ``unknown`` after a restart / while
+        idle instead of a misleading ``0.0``.
+        """
+        if not self._active_observability_ready:
+            return None
         return round(self._last_active_spread, 2)
 
-    def get_max_active_error(self) -> float:
-        """Largest absolute active-room error vs the setpoint in °C (R14.1)."""
+    def get_max_active_error(self) -> float | None:
+        """Largest absolute active-room error vs the setpoint in °C (R14.1).
+
+        Returns ``None`` until the first active conditioning poll has computed a
+        real value (see :meth:`get_active_room_spread`).
+        """
+        if not self._active_observability_ready:
+            return None
         return round(self._last_max_active_error, 2)
 
     def get_recalculations_24h(self) -> int:

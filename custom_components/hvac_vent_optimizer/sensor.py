@@ -638,6 +638,49 @@ class FlairRoomSensor(CoordinatorEntity, SensorEntity):
         return attrs
 
 
+class _CelsiusDeltaMixin:
+    """Render °C temperature-*delta* metrics in the system unit (°F on US).
+
+    Spread/error metrics are temperature DIFFERENCES, so they are intentionally
+    not ``device_class=temperature`` (HA would convert them as absolute temps,
+    e.g. a 2 °C spread → 35.6 °F). We convert the delta ourselves: a °F delta is
+    the °C delta x 1.8 with no +32 offset. Non-temperature descriptions (counts,
+    percentages, strings) and non-US systems pass through unchanged.
+    """
+
+    entity_description: SensorEntityDescription
+
+    def _delta_is_temperature(self) -> bool:
+        return self.entity_description.native_unit_of_measurement == UnitOfTemperature.CELSIUS
+
+    def _system_is_fahrenheit(self) -> bool:
+        coordinator = getattr(self, "coordinator", None)
+        hass = getattr(coordinator, "hass", None) or getattr(self, "hass", None)
+        config = getattr(hass, "config", None)
+        units = getattr(config, "units", None)
+        return getattr(units, "temperature_unit", None) == UnitOfTemperature.FAHRENHEIT
+
+    @property
+    def native_unit_of_measurement(self):
+        base = self.entity_description.native_unit_of_measurement
+        if self._delta_is_temperature() and self._system_is_fahrenheit():
+            return UnitOfTemperature.FAHRENHEIT
+        return base
+
+    def _convert_delta(self, value):
+        if (
+            value is not None
+            and not isinstance(value, str)
+            and self._delta_is_temperature()
+            and self._system_is_fahrenheit()
+        ):
+            try:
+                return round(float(value) * 1.8, 2)
+            except (TypeError, ValueError):
+                return value
+        return value
+
+
 class FlairSystemSensor(CoordinatorEntity, SensorEntity):
     """System-level diagnostic sensor for strategy effectiveness."""
 
@@ -661,7 +704,7 @@ class FlairSystemSensor(CoordinatorEntity, SensorEntity):
         return self.coordinator.get_strategy_metrics()
 
 
-class FlairStrategyMetricSensor(CoordinatorEntity, SensorEntity):
+class FlairStrategyMetricSensor(_CelsiusDeltaMixin, CoordinatorEntity, SensorEntity):
     """Expose selected DAB strategy effectiveness metrics."""
 
     entity_description: StrategyMetricSensorDescription
@@ -695,14 +738,14 @@ class FlairStrategyMetricSensor(CoordinatorEntity, SensorEntity):
         if value is None:
             return None
         if isinstance(value, (int, float)):
-            return value
+            return self._convert_delta(value)
         try:
-            return float(value)
+            return self._convert_delta(float(value))
         except (TypeError, ValueError):
             return None
 
 
-class DabHoldStatusSensor(CoordinatorEntity, SensorEntity):
+class DabHoldStatusSensor(_CelsiusDeltaMixin, CoordinatorEntity, SensorEntity):
     """Expose DAB hold/deviation observability metrics."""
 
     def __init__(self, coordinator, entry_id: str, description: SensorEntityDescription) -> None:
@@ -721,7 +764,7 @@ class DabHoldStatusSensor(CoordinatorEntity, SensorEntity):
         if key == "dab_hold_status":
             return self.coordinator.get_hold_status()
         if key == "dab_deviation_max":
-            return self.coordinator.get_max_deviation()
+            return self._convert_delta(self.coordinator.get_max_deviation())
         if key == "dab_holds_count":
             return self.coordinator.get_hold_count()
         if key == "dab_recalculations_count":
@@ -729,9 +772,9 @@ class DabHoldStatusSensor(CoordinatorEntity, SensorEntity):
         if key == "dab_hold_ratio":
             return self.coordinator.get_hold_ratio()
         if key == "dab_active_room_spread":
-            return self.coordinator.get_active_room_spread()
+            return self._convert_delta(self.coordinator.get_active_room_spread())
         if key == "dab_max_active_error":
-            return self.coordinator.get_max_active_error()
+            return self._convert_delta(self.coordinator.get_max_active_error())
         if key == "dab_recalculations_24h":
             return self.coordinator.get_recalculations_24h()
         if key == "dab_holds_24h":
