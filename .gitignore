@@ -44,3 +44,7 @@ smart_vents_dashboard.yaml
 # Re-include this project's docs/ (a global ~/.gitignore_global rule ignores 'docs' everywhere)
 !docs/
 !docs/**
+
+# Raw, unscrubbed screenshots / scratch (may contain PII). The PII-scrubbed
+# README image lives in docs/images/. Never commit the raw originals.
+/images/
