@@ -40,3 +40,7 @@ Thumbs.db
 eficiency_export.json
 smarter_flair_vents_efficiency_debug.json
 smart_vents_dashboard.yaml
+
+# Re-include this project's docs/ (a global ~/.gitignore_global rule ignores 'docs' everywhere)
+!docs/
+!docs/**
