@@ -634,6 +634,7 @@ class FlairRoomSensor(CoordinatorEntity, SensorEntity):
         if door_factor is not None:
             attrs["door_factor"] = door_factor
             attrs["door_factor_trusted"] = self.coordinator.get_room_door_factor_trusted(self._room_id)
+            attrs["door_open"] = self.coordinator.get_room_door_open(self._room_id)
         return attrs
 
 

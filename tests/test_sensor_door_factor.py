@@ -28,7 +28,7 @@ from __future__ import annotations
 
 from hvac_vent_optimizer import const
 from hvac_vent_optimizer.learning import DOOR_MIN_N, DoorFactorCell, new_door_factor_model
-from tests._fakes import FakeApi, FakeEntry, FakeHass
+from tests._fakes import FakeApi, FakeEntry, FakeHass, FakeState
 
 ROOM_ID = "room1"
 ROOM_NAME = "Bedroom 2"
@@ -169,3 +169,39 @@ def test_value_reflects_active_mode_per_mode_resolution():
     assert heating_attrs.get("door_factor") == 0.6
     assert cooling_attrs.get("door_factor_trusted") is True
     assert heating_attrs.get("door_factor_trusted") is True
+
+
+# ---------------------------------------------------------------------------
+# Door open/closed state surfaced for auto-discovery on the dashboard.
+# A room with a door sensor configured exposes ``door_open`` (tri-state) so the
+# dashboard can render the door state generically — no per-room hardcoding —
+# and any room later given a door sensor lights up automatically.
+# ---------------------------------------------------------------------------
+def test_room_with_open_door_exposes_door_open_true():
+    coord = _make(mode="cooling")
+    coord.hass.states.set(DOOR_SENSOR, FakeState("on"))
+    attrs = _room_attrs(coord)
+    assert attrs.get("door_open") is True
+
+
+def test_room_with_closed_door_exposes_door_open_false():
+    coord = _make(mode="cooling")
+    coord.hass.states.set(DOOR_SENSOR, FakeState("off"))
+    attrs = _room_attrs(coord)
+    assert attrs.get("door_open") is False
+
+
+def test_room_without_door_sensor_has_no_door_open():
+    # No sensor configured -> neither the factor nor the open-state key appears.
+    attrs = _room_attrs(_make(door_sensor=False))
+    assert "door_open" not in attrs
+
+
+def test_door_sensor_unavailable_reports_door_open_none():
+    # Configured but offline/unknown -> key present (room has a sensor) but None,
+    # which the dashboard renders as a neutral dash rather than a false "closed".
+    coord = _make(mode="cooling")
+    coord.hass.states.set(DOOR_SENSOR, FakeState("unavailable"))
+    attrs = _room_attrs(coord)
+    assert "door_open" in attrs
+    assert attrs.get("door_open") is None

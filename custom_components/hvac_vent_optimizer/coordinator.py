@@ -3711,6 +3711,39 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         trusted = self._door_factor_cell_trusted(model, mode)
         return factor, trusted
 
+    def get_room_door_open(self, room_id: str) -> bool | None:
+        """Aggregate open/closed state of a room's configured door sensor(s).
+
+        Companion to :meth:`get_room_door_factor` for observability (R30): lets
+        the dashboard render a room's door state generically off a single
+        attribute instead of hardcoding the sensor entity per room, so any room
+        later given a door sensor surfaces automatically.
+
+        Returns ``True`` if any door sensor on the room's vents reports open,
+        ``False`` if at least one reports a known state and none are open, or
+        ``None`` when the room has no door sensor configured or none report a
+        usable state (mirrors the R30.2 gate used for the learned factor).
+        """
+        data = self.data or {}
+        assignments = self._get_vent_assignments()
+        any_open = False
+        any_known = False
+        for vent_id, vent in (data.get("vents") or {}).items():
+            if (vent.get("room") or {}).get("id") != room_id:
+                continue
+            door_sensor = (assignments.get(vent_id) or {}).get(CONF_DOOR_SENSOR_ENTITY)
+            if not door_sensor:
+                continue
+            state = self.hass.states.get(door_sensor)
+            if state is None or state.state in {STATE_UNKNOWN, STATE_UNAVAILABLE}:
+                continue
+            any_known = True
+            if state.state == "on":
+                any_open = True
+        if not any_known:
+            return None
+        return any_open
+
     @staticmethod
     def _door_factor_cell_trusted(model: DoorFactorModel | None, mode: str) -> bool:
         """Whether ``mode``'s door-factor cell meets the confidence gate (R30.1).
