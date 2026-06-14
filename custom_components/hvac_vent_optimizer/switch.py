@@ -1,4 +1,5 @@
 """Switch platform for Flair room active state."""
+
 from __future__ import annotations
 
 from homeassistant.components.switch import SwitchEntity
@@ -25,10 +26,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         if room_id and room_id not in rooms:
             rooms[room_id] = room
 
-    entities = [
-        FlairRoomActiveSwitch(coordinator, entry.entry_id, room_id)
-        for room_id in rooms.keys()
-    ]
+    entities = [FlairRoomActiveSwitch(coordinator, entry.entry_id, room_id) for room_id in rooms]
     async_add_entities(entities)
 
 

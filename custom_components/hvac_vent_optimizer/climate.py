@@ -1,5 +1,8 @@
 """Climate platform for Flair room setpoint control."""
+
 from __future__ import annotations
+
+from typing import ClassVar
 
 from homeassistant.components.climate import ClimateEntity
 from homeassistant.components.climate.const import ClimateEntityFeature, HVACMode
@@ -27,10 +30,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         if room_id and room_id not in rooms:
             rooms[room_id] = room
 
-    entities = [
-        FlairRoomClimate(coordinator, entry.entry_id, room_id)
-        for room_id in rooms.keys()
-    ]
+    entities = [FlairRoomClimate(coordinator, entry.entry_id, room_id) for room_id in rooms]
     async_add_entities(entities)
 
 
@@ -38,7 +38,7 @@ class FlairRoomClimate(CoordinatorEntity, ClimateEntity):
     """Room setpoint control as a climate entity."""
 
     _attr_supported_features = ClimateEntityFeature.TARGET_TEMPERATURE
-    _attr_hvac_modes = [HVACMode.AUTO]
+    _attr_hvac_modes: ClassVar[list[HVACMode]] = [HVACMode.AUTO]
     _attr_hvac_mode = HVACMode.AUTO
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
 
@@ -82,8 +82,8 @@ class FlairRoomClimate(CoordinatorEntity, ClimateEntity):
         temperature = kwargs.get(ATTR_TEMPERATURE)
         if temperature is None:
             return
+        # Home Assistant converts the requested value into this entity's native
+        # unit (Celsius) before calling us, so pass it straight to Flair.
         temp_c = float(temperature)
-        if self.hass.config.units.temperature_unit == UnitOfTemperature.FAHRENHEIT:
-            temp_c = (temp_c - 32) * 5 / 9
         await self.coordinator.api.async_set_room_setpoint(self._room_id, temp_c)
         await self.coordinator.async_request_refresh()

@@ -1,0 +1,34 @@
+# Pre-commit hooks for the HVAC Vent Optimizer custom integration.
+#
+# Install once with:  pre-commit install
+# Run on all files:   pre-commit run --all-files
+#
+# All three gates read their configuration from pyproject.toml so the hooks,
+# the CI check, and local `ruff`/`black`/`mypy` invocations stay in lockstep.
+# Hook revisions are pinned to the versions validated locally in Task 2.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.16
+    hooks:
+      - id: ruff
+        name: ruff (lint)
+        args: [--fix]
+
+  - repo: https://github.com/psf/black
+    rev: 25.1.0
+    hooks:
+      - id: black
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.18.2
+    hooks:
+      - id: mypy
+        name: mypy (types)
+        # Type-check the integration package; configuration (permissive
+        # baseline + strict pure modules) lives in pyproject.toml.
+        args: [--config-file=pyproject.toml]
+        # HA / aiohttp / voluptuous are not installed in the hook venv; missing
+        # imports are ignored via pyproject. Add real stubs here later if the
+        # baseline is tightened.
+        additional_dependencies: []
+        exclude: ^tests/

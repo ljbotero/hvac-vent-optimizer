@@ -1,17 +1,19 @@
 """Sensor platform for Flair pucks and vents."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC
 
 from homeassistant.components.sensor import SensorEntity, SensorEntityDescription, SensorStateClass
-from datetime import timezone
 from homeassistant.const import (
     PERCENTAGE,
-    UnitOfTemperature,
     SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
     UnitOfPressure,
+    UnitOfTemperature,
 )
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
 
@@ -103,6 +105,63 @@ SYSTEM_SENSOR_DESCRIPTION = SensorEntityDescription(
     key="strategy_effectiveness",
     name="DAB Strategy Effectiveness",
 )
+HOLD_STATUS_DESCRIPTION = SensorEntityDescription(
+    key="dab_hold_status",
+    name="DAB Hold Status",
+    icon="mdi:pause-circle-outline",
+)
+DEVIATION_MAX_DESCRIPTION = SensorEntityDescription(
+    key="dab_deviation_max",
+    name="DAB Max Deviation",
+    native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+    state_class=SensorStateClass.MEASUREMENT,
+    icon="mdi:thermometer-chevron-up",
+)
+HOLDS_COUNT_DESCRIPTION = SensorEntityDescription(
+    key="dab_holds_count",
+    name="DAB Holds (Total)",
+    state_class=SensorStateClass.TOTAL_INCREASING,
+    icon="mdi:counter",
+)
+RECALC_COUNT_DESCRIPTION = SensorEntityDescription(
+    key="dab_recalculations_count",
+    name="DAB Recalculations (Total)",
+    state_class=SensorStateClass.TOTAL_INCREASING,
+    icon="mdi:calculator-variant",
+)
+HOLD_RATIO_DESCRIPTION = SensorEntityDescription(
+    key="dab_hold_ratio",
+    name="DAB Hold Ratio",
+    native_unit_of_measurement=PERCENTAGE,
+    state_class=SensorStateClass.MEASUREMENT,
+    icon="mdi:percent-circle-outline",
+)
+ACTIVE_ROOM_SPREAD_DESCRIPTION = SensorEntityDescription(
+    key="dab_active_room_spread",
+    name="DAB Active Room Spread",
+    native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+    state_class=SensorStateClass.MEASUREMENT,
+    icon="mdi:arrow-expand-horizontal",
+)
+MAX_ACTIVE_ERROR_DESCRIPTION = SensorEntityDescription(
+    key="dab_max_active_error",
+    name="DAB Max Active Error",
+    native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+    state_class=SensorStateClass.MEASUREMENT,
+    icon="mdi:thermometer-alert",
+)
+RECALC_24H_DESCRIPTION = SensorEntityDescription(
+    key="dab_recalculations_24h",
+    name="DAB Recalculations (24h)",
+    state_class=SensorStateClass.MEASUREMENT,
+    icon="mdi:calculator-variant-outline",
+)
+HOLDS_24H_DESCRIPTION = SensorEntityDescription(
+    key="dab_holds_24h",
+    name="DAB Holds (24h)",
+    state_class=SensorStateClass.MEASUREMENT,
+    icon="mdi:counter",
+)
 STRATEGY_METRIC_DESCRIPTIONS: tuple[StrategyMetricSensorDescription, ...] = (
     StrategyMetricSensorDescription(
         key="dab_avg_temp_error",
@@ -172,6 +231,30 @@ STRATEGY_METRIC_DESCRIPTIONS: tuple[StrategyMetricSensorDescription, ...] = (
         metric_key="last_active_rooms",
         state_class=SensorStateClass.MEASUREMENT,
         icon="mdi:home-group",
+    ),
+    StrategyMetricSensorDescription(
+        key="dab_avg_spread",
+        name="DAB Avg Spread",
+        metric_key="avg_spread",
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:arrow-expand-horizontal",
+    ),
+    StrategyMetricSensorDescription(
+        key="dab_max_spread",
+        name="DAB Max Spread",
+        metric_key="max_spread",
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:arrow-expand-horizontal",
+    ),
+    StrategyMetricSensorDescription(
+        key="dab_time_above_guardrail",
+        name="DAB Time Above Guardrail",
+        metric_key="time_above_guardrail_min",
+        native_unit_of_measurement="min",
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:timer-alert-outline",
     ),
 )
 MANUAL_SUGGESTED_DESCRIPTION = SensorEntityDescription(
@@ -269,11 +352,11 @@ async def async_setup_entry(hass, entry, async_add_entities):
     vents = coordinator.data.get("vents", {}) if coordinator.data else {}
     entities: list[FlairPuckSensor] = []
 
-    for puck_id in pucks.keys():
+    for puck_id in pucks:
         for description in PUCK_SENSOR_DESCRIPTIONS:
             entities.append(FlairPuckSensor(coordinator, entry.entry_id, puck_id, description))
 
-    for vent_id in vents.keys():
+    for vent_id in vents:
         for description in VENT_SENSOR_DESCRIPTIONS:
             entities.append(FlairVentSensor(coordinator, entry.entry_id, vent_id, description))
         for description in VENT_METRIC_SENSOR_DESCRIPTIONS:
@@ -297,13 +380,25 @@ async def async_setup_entry(hass, entry, async_add_entities):
         if room_id and room_id not in rooms:
             rooms[room_id] = room
 
-    for room_id in rooms.keys():
+    for room_id in rooms:
         for description in ROOM_SENSOR_DESCRIPTIONS:
             entities.append(FlairRoomSensor(coordinator, entry.entry_id, room_id, description))
 
     entities.append(FlairSystemSensor(coordinator, entry.entry_id))
     for description in STRATEGY_METRIC_DESCRIPTIONS:
         entities.append(FlairStrategyMetricSensor(coordinator, entry.entry_id, description))
+
+    # Hold/deviation observability sensors
+    entities.append(DabHoldStatusSensor(coordinator, entry.entry_id, HOLD_STATUS_DESCRIPTION))
+    entities.append(DabHoldStatusSensor(coordinator, entry.entry_id, DEVIATION_MAX_DESCRIPTION))
+    entities.append(DabHoldStatusSensor(coordinator, entry.entry_id, HOLDS_COUNT_DESCRIPTION))
+    entities.append(DabHoldStatusSensor(coordinator, entry.entry_id, RECALC_COUNT_DESCRIPTION))
+    entities.append(DabHoldStatusSensor(coordinator, entry.entry_id, HOLD_RATIO_DESCRIPTION))
+    # Task 24 spread/error observability sensors (R13/R14)
+    entities.append(DabHoldStatusSensor(coordinator, entry.entry_id, ACTIVE_ROOM_SPREAD_DESCRIPTION))
+    entities.append(DabHoldStatusSensor(coordinator, entry.entry_id, MAX_ACTIVE_ERROR_DESCRIPTION))
+    entities.append(DabHoldStatusSensor(coordinator, entry.entry_id, RECALC_24H_DESCRIPTION))
+    entities.append(DabHoldStatusSensor(coordinator, entry.entry_id, HOLDS_24H_DESCRIPTION))
 
     async_add_entities(entities)
 
@@ -313,7 +408,9 @@ class FlairPuckSensor(CoordinatorEntity, SensorEntity):
 
     entity_description: FlairPuckSensorDescription
 
-    def __init__(self, coordinator, entry_id: str, puck_id: str, description: FlairPuckSensorDescription) -> None:
+    def __init__(
+        self, coordinator, entry_id: str, puck_id: str, description: FlairPuckSensorDescription
+    ) -> None:
         super().__init__(coordinator)
         self.entity_description = description
         self._entry_id = entry_id
@@ -353,7 +450,7 @@ class FlairPuckSensor(CoordinatorEntity, SensorEntity):
             voltage = attrs.get("system-voltage")
             if voltage is None:
                 return None
-            return max(0, min(100, int(round(((voltage - 2.0) / 1.6) * 100))))
+            return max(0, min(100, round(((voltage - 2.0) / 1.6) * 100)))
 
         return value
 
@@ -363,7 +460,9 @@ class FlairVentSensor(CoordinatorEntity, SensorEntity):
 
     entity_description: FlairVentSensorDescription
 
-    def __init__(self, coordinator, entry_id: str, vent_id: str, description: FlairVentSensorDescription) -> None:
+    def __init__(
+        self, coordinator, entry_id: str, vent_id: str, description: FlairVentSensorDescription
+    ) -> None:
         super().__init__(coordinator)
         self.entity_description = description
         self._entry_id = entry_id
@@ -407,13 +506,21 @@ class FlairVentSensor(CoordinatorEntity, SensorEntity):
             if value is None:
                 return None
             if value.tzinfo is None:
-                return value.replace(tzinfo=timezone.utc)
-            return value
+                return value.replace(tzinfo=UTC)
+            return dt_util.as_utc(value)
 
         vent = (self.coordinator.data or {}).get("vents", {}).get(self._vent_id, {})
         attrs = vent.get("attributes", {})
         attribute = self.entity_description.attribute
         return attrs.get(attribute) if attribute else None
+
+    @property
+    def extra_state_attributes(self):
+        # Per-vent learned leakage diagnostic on the efficiency sensors (R25.11).
+        mode = self.entity_description.efficiency_mode
+        if not mode:
+            return None
+        return {"leak": self.coordinator.get_vent_leak(self._vent_id, mode)}
 
 
 class FlairVentMetricSensor(CoordinatorEntity, SensorEntity):
@@ -470,7 +577,9 @@ class FlairRoomSensor(CoordinatorEntity, SensorEntity):
 
     entity_description: FlairRoomSensorDescription
 
-    def __init__(self, coordinator, entry_id: str, room_id: str, description: FlairRoomSensorDescription) -> None:
+    def __init__(
+        self, coordinator, entry_id: str, room_id: str, description: FlairRoomSensorDescription
+    ) -> None:
         super().__init__(coordinator)
         self.entity_description = description
         self._entry_id = entry_id
@@ -506,6 +615,26 @@ class FlairRoomSensor(CoordinatorEntity, SensorEntity):
         if self.entity_description.room_field == "thermostat":
             return self.coordinator.get_room_thermostat(self._room_id)
         return None
+
+    @property
+    def extra_state_attributes(self):
+        # Per-room observability diagnostics (R13.3/R5.4/R25.11). Only attached
+        # to the room temperature sensor; thermostat sensor has none.
+        if self.entity_description.room_field != "temperature":
+            return None
+        attrs: dict[str, object] = {
+            "signed_error_c": self.coordinator.get_room_signed_error(self._room_id),
+            "airflow_limited": self.coordinator.is_room_airflow_limited(self._room_id),
+            "cooling_efficiency": self.coordinator.get_room_efficiency_percent(self._room_id, "cooling"),
+            "heating_efficiency": self.coordinator.get_room_efficiency_percent(self._room_id, "heating"),
+        }
+        # Learned door-leakage multiplier (R30): surfaced ONLY for a room with a
+        # door sensor configured, so a sensorless room shows no misleading factor.
+        door_factor = self.coordinator.get_room_door_factor(self._room_id)
+        if door_factor is not None:
+            attrs["door_factor"] = door_factor
+            attrs["door_factor_trusted"] = self.coordinator.get_room_door_factor_trusted(self._room_id)
+        return attrs
 
 
 class FlairSystemSensor(CoordinatorEntity, SensorEntity):
@@ -572,10 +701,49 @@ class FlairStrategyMetricSensor(CoordinatorEntity, SensorEntity):
             return None
 
 
+class DabHoldStatusSensor(CoordinatorEntity, SensorEntity):
+    """Expose DAB hold/deviation observability metrics."""
+
+    def __init__(self, coordinator, entry_id: str, description: SensorEntityDescription) -> None:
+        super().__init__(coordinator)
+        self.entity_description = description
+        self._entry_id = entry_id
+        self._attr_unique_id = f"{entry_id}_{description.key}"
+
+    @property
+    def name(self):
+        return self.entity_description.name
+
+    @property
+    def native_value(self):
+        key = self.entity_description.key
+        if key == "dab_hold_status":
+            return self.coordinator.get_hold_status()
+        if key == "dab_deviation_max":
+            return self.coordinator.get_max_deviation()
+        if key == "dab_holds_count":
+            return self.coordinator.get_hold_count()
+        if key == "dab_recalculations_count":
+            return self.coordinator.get_recalc_count()
+        if key == "dab_hold_ratio":
+            return self.coordinator.get_hold_ratio()
+        if key == "dab_active_room_spread":
+            return self.coordinator.get_active_room_spread()
+        if key == "dab_max_active_error":
+            return self.coordinator.get_max_active_error()
+        if key == "dab_recalculations_24h":
+            return self.coordinator.get_recalculations_24h()
+        if key == "dab_holds_24h":
+            return self.coordinator.get_holds_24h()
+        return None
+
+
 class ManualSuggestedApertureSensor(CoordinatorEntity, SensorEntity):
     """Suggested aperture sensor for manual vents."""
 
-    def __init__(self, coordinator, entry_id: str, vent_id: str, description: SensorEntityDescription) -> None:
+    def __init__(
+        self, coordinator, entry_id: str, vent_id: str, description: SensorEntityDescription
+    ) -> None:
         super().__init__(coordinator)
         self.entity_description = description
         self._entry_id = entry_id

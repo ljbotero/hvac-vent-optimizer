@@ -1,7 +1,8 @@
 """Cover platform for Flair vents."""
+
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from homeassistant.components.cover import CoverEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -14,10 +15,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     if coordinator.is_manual_brand():
         return
     vents = coordinator.data.get("vents", {}) if coordinator.data else {}
-    entities = [
-        FlairVentCover(coordinator, entry.entry_id, vent_id)
-        for vent_id in vents.keys()
-    ]
+    entities = [FlairVentCover(coordinator, entry.entry_id, vent_id) for vent_id in vents]
     async_add_entities(entities)
 
 
@@ -29,7 +27,7 @@ class FlairVentCover(CoordinatorEntity, CoverEntity):
         self._entry_id = entry_id
         self._vent_id = vent_id
         self._attr_unique_id = f"{entry_id}_vent_{vent_id}"
-        self._attr_current_cover_position = None
+        self._attr_current_cover_position: int | None = None
         self._pending_position: int | None = None
         self._pending_until: datetime | None = None
 
@@ -55,7 +53,7 @@ class FlairVentCover(CoordinatorEntity, CoverEntity):
     @property
     def current_cover_position(self):
         if self._pending_position is not None and self._pending_until:
-            if datetime.now(timezone.utc) < self._pending_until:
+            if datetime.now(UTC) < self._pending_until:
                 return self._pending_position
             self._pending_position = None
             self._pending_until = None
@@ -81,7 +79,7 @@ class FlairVentCover(CoordinatorEntity, CoverEntity):
             return
         position = int(position)
         self._pending_position = position
-        self._pending_until = datetime.now(timezone.utc) + timedelta(seconds=30)
+        self._pending_until = datetime.now(UTC) + timedelta(seconds=30)
         self._attr_current_cover_position = position
         self.async_write_ha_state()
         await self.coordinator.api.async_set_vent_position(self._vent_id, position)
@@ -97,12 +95,9 @@ class FlairVentCover(CoordinatorEntity, CoverEntity):
         vent = (self.coordinator.data or {}).get("vents", {}).get(self._vent_id, {})
         attrs = vent.get("attributes", {})
         percent = attrs.get("percent-open")
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         if self._pending_position is not None and self._pending_until:
-            if now >= self._pending_until:
-                self._pending_position = None
-                self._pending_until = None
-            elif percent is not None and int(percent) == self._pending_position:
+            if now >= self._pending_until or (percent is not None and int(percent) == self._pending_position):
                 self._pending_position = None
                 self._pending_until = None
             else:
