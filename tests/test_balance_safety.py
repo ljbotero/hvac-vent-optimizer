@@ -63,7 +63,7 @@ PINNED CONTRACT FOR TASK 10.2 (this file is the executable specification)
    * **Never finishes below the floor** when capacity exists: the returned
      combined ``>= settings.safety_floor_pct`` (R3.1/R3.5). This file tests that
      ``apply_safety_floor`` *respects* ``settings.safety_floor_pct`` as given;
-     clamping the configured value to the safe 20–90 % band is Task 10.2.
+     clamping the configured value to the safe 20-90 % band is Task 10.2.
    * **Bias to need (R3.4).** Padding raises the *unsatisfied active room with
      the largest signed error and target < 100* first, then recomputes and
      repeats one ``settings.granularity`` increment at a time. Satisfied active
@@ -117,7 +117,12 @@ import sys
 
 import pytest
 
-_BALANCE_PATH = pathlib.Path(__file__).resolve().parent.parent / "custom_components" / "hvac_vent_optimizer" / "balance.py"
+_BALANCE_PATH = (
+    pathlib.Path(__file__).resolve().parent.parent
+    / "custom_components"
+    / "hvac_vent_optimizer"
+    / "balance.py"
+)
 _spec = importlib.util.spec_from_file_location("hvo_balance", _BALANCE_PATH)
 balance = importlib.util.module_from_spec(_spec)
 # Register before exec so dataclass introspection (with `from __future__ import
@@ -165,14 +170,14 @@ def _room(
 
 def _settings(**overrides):
     """AllocSettings with floor defaults; overridable per test."""
-    base = dict(
-        safety_floor_pct=40.0,
-        conventional_vents=0,
-        conventional_open_pct=50.0,
-        inactive_open_pct_sum=0.0,
-        inactive_count=0,
-        granularity=5,
-    )
+    base = {
+        "safety_floor_pct": 40.0,
+        "conventional_vents": 0,
+        "conventional_open_pct": 50.0,
+        "inactive_open_pct_sum": 0.0,
+        "inactive_count": 0,
+        "granularity": 5,
+    }
     base.update(overrides)
     return balance.AllocSettings(**base)
 
@@ -199,9 +204,7 @@ _WORKED_BASE_TARGETS = {
 
 
 def _worked_rooms():
-    return [
-        _room(rid, signed_error_c=err) for rid, err in _WORKED_SIGNED_ERR.items()
-    ]
+    return [_room(rid, signed_error_c=err) for rid, err in _WORKED_SIGNED_ERR.items()]
 
 
 # ===========================================================================
@@ -356,12 +359,16 @@ class TestBiasTowardNeed:
 
         new30, b30 = balance.apply_safety_floor(dict(targets), rooms, _settings(safety_floor_pct=30.0))
         assert b30 is True
-        assert balance.combined_open_pct(new30, _settings(safety_floor_pct=30.0)) == pytest.approx(30.0, abs=1e-6)
+        assert balance.combined_open_pct(new30, _settings(safety_floor_pct=30.0)) == pytest.approx(
+            30.0, abs=1e-6
+        )
         assert new30["High"] == pytest.approx(40.0, abs=1e-6)
 
         new40, b40 = balance.apply_safety_floor(dict(targets), rooms, _settings(safety_floor_pct=40.0))
         assert b40 is True
-        assert balance.combined_open_pct(new40, _settings(safety_floor_pct=40.0)) == pytest.approx(40.0, abs=1e-6)
+        assert balance.combined_open_pct(new40, _settings(safety_floor_pct=40.0)) == pytest.approx(
+            40.0, abs=1e-6
+        )
 
 
 # ===========================================================================
@@ -388,19 +395,15 @@ class TestWorkedExample:
         assert balance.combined_open_pct(new, self._settings()) >= 40.0
 
     def test_bottleneck_stays_full_open_and_satisfied_stays_closed(self):
-        new, _ = balance.apply_safety_floor(
-            dict(_WORKED_BASE_TARGETS), _worked_rooms(), self._settings()
-        )
-        assert new["Bedroom 2"] == 100.0          # bottleneck, can't pad past 100
-        assert new["Bathroom"] == 0.0           # satisfied → never reopened (R3.4)
+        new, _ = balance.apply_safety_floor(dict(_WORKED_BASE_TARGETS), _worked_rooms(), self._settings())
+        assert new["Bedroom 2"] == 100.0  # bottleneck, can't pad past 100
+        assert new["Bathroom"] == 0.0  # satisfied → never reopened (R3.4)
 
     def test_highest_error_eligible_room_is_padded(self):
         # Eligible = active, signed_error > 0, base target < 100.
         # Bedroom 2(1.8) is at 100 → ineligible; Bedroom 3(1.6) is the highest-error
         # eligible room, so Bedroom 3 is padded (75 → 80). Following R3.4, NOT Guest.
-        new, _ = balance.apply_safety_floor(
-            dict(_WORKED_BASE_TARGETS), _worked_rooms(), self._settings()
-        )
+        new, _ = balance.apply_safety_floor(dict(_WORKED_BASE_TARGETS), _worked_rooms(), self._settings())
         assert new["Bedroom 3"] == pytest.approx(80.0, abs=1e-6)
         # The lower-error rooms are left exactly where allocation put them.
         assert new["Guest"] == 20.0
@@ -408,9 +411,7 @@ class TestWorkedExample:
         assert new["Master"] == 0.0
 
     def test_floor_only_ever_raises_and_clamps_at_100(self):
-        new, _ = balance.apply_safety_floor(
-            dict(_WORKED_BASE_TARGETS), _worked_rooms(), self._settings()
-        )
+        new, _ = balance.apply_safety_floor(dict(_WORKED_BASE_TARGETS), _worked_rooms(), self._settings())
         for rid, base in _WORKED_BASE_TARGETS.items():
             assert new[rid] >= base, f"{rid} was lowered by the floor"
             assert new[rid] <= 100.0, f"{rid} exceeds 100 %"
@@ -434,7 +435,7 @@ class TestPerVentDeviceCount:
         new, binding = balance.apply_safety_floor(dict(targets), rooms, _settings())
         assert binding is True, "per-room counting would not bind; must count each vent"
         assert new["Solo"] == 100.0  # already maxed
-        assert new["Twin"] > 0.0     # padded to lift the 3-device average to 40 %
+        assert new["Twin"] > 0.0  # padded to lift the 3-device average to 40 %
 
 
 # ===========================================================================
@@ -493,9 +494,9 @@ class TestInactiveLastResort:
         assert reopened, "inactive rooms must be reopened when nothing else can meet the floor"
         # The last-resort branch must log its reason (R3.9).
         logged = " ".join(rec.getMessage().lower() for rec in caplog.records)
-        assert ("inactive" in logged) or ("last resort" in logged) or ("floor" in logged), (
-            "last-resort inactive reopen must be logged"
-        )
+        assert (
+            ("inactive" in logged) or ("last resort" in logged) or ("floor" in logged)
+        ), "last-resort inactive reopen must be logged"
 
 
 # ===========================================================================

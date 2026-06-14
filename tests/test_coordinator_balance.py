@@ -347,7 +347,7 @@ def test_balance_seeded_saturating_curve_drives_bottleneck_to_knee():
 def test_get_vent_curve_falls_back_to_near_linear_when_unseeded():
     # No vent_effectiveness and no regression → a near-linear seed curve whose
     # knee is 100 % (so behavior matches the scalar-leak model it supersedes).
-    coord, _api, thermostat, data = _build(
+    coord, _api, _thermostat, _data = _build(
         [{"id": "hot", "name": "Bedroom 2", "temp": 27.9, "active": True, "open": 0, "eff": 0.017}]
     )
     from homeassistant.components.climate.const import HVACAction

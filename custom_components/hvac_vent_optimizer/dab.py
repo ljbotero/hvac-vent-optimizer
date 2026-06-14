@@ -1,8 +1,9 @@
 """Dynamic Airflow Balancing (DAB) algorithm helpers."""
+
 from __future__ import annotations
 
-from dataclasses import dataclass
 import math
+from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
@@ -39,21 +40,25 @@ def round_big_decimal(value: float, scale: int = 3) -> float:
 
 def round_to_nearest_multiple(value: float, granularity: int) -> int:
     if granularity <= 0:
-        return int(round(value))
-    return int(round(value / granularity)) * granularity
+        return round(value)
+    return round(value / granularity) * granularity
 
 
-def rolling_average(current_average: float | None, new_number: float, weight: float = 1, num_entries: int = 10) -> float:
+def rolling_average(
+    current_average: float | None, new_number: float, weight: float = 1, num_entries: int = 10
+) -> float:
     if num_entries <= 0:
         return 0
-    base = new_number if not current_average else current_average
+    base = current_average if current_average else new_number
     total = base * (num_entries - 1)
     weighted_value = (new_number - base) * weight
     total += base + weighted_value
     return total / num_entries
 
 
-def has_room_reached_setpoint(hvac_mode: str, setpoint: float, current_temp: float, offset: float = 0) -> bool:
+def has_room_reached_setpoint(
+    hvac_mode: str, setpoint: float, current_temp: float, offset: float = 0
+) -> bool:
     if hvac_mode == "cooling":
         return current_temp <= setpoint - offset
     return current_temp >= setpoint + offset
@@ -154,9 +159,7 @@ def calculate_open_percentage_for_all_vents(
 
         if close_inactive and not active:
             percentage_open = 0.0
-        elif has_room_reached_setpoint(
-            hvac_mode, setpoint, float(state_val.get("temp", 0) or 0)
-        ):
+        elif has_room_reached_setpoint(hvac_mode, setpoint, float(state_val.get("temp", 0) or 0)):
             # Directional overshoot guard (R8): a room already past the setpoint
             # is satisfied and must close, even when its learned rate is below
             # the detection floor (which would otherwise force it wide open).
@@ -244,16 +247,11 @@ def adjust_for_minimum_airflow(
         if allow_inactive_if_needed and active_only and inactive_ids:
             consider_ids = inactive_ids
             total_device_count = len(consider_ids)
-            sum_percentages = sum(
-                calculated_percent_open.get(vent_id, 0) or 0 for vent_id in consider_ids
-            )
+            sum_percentages = sum(calculated_percent_open.get(vent_id, 0) or 0 for vent_id in consider_ids)
         else:
             return calculated_percent_open
 
-    temps = [
-        float(rate_and_temp_per_vent_id[vent_id].get("temp", 0) or 0)
-        for vent_id in consider_ids
-    ]
+    temps = [float(rate_and_temp_per_vent_id[vent_id].get("temp", 0) or 0) for vent_id in consider_ids]
     if not temps:
         min_temp = 20.0
         max_temp = 25.0
@@ -269,6 +267,7 @@ def adjust_for_minimum_airflow(
     diff_percentage_sum = target_percent_sum - sum_percentages
 
     iterations = 0
+
     def _increment(vent_ids: list[str], diff_sum: float) -> float:
         nonlocal iterations
         while diff_sum > 0 and iterations < settings.max_iterations:
@@ -280,15 +279,11 @@ def adjust_for_minimum_airflow(
                     continue
 
                 if max_temp == min_temp:
-                    proportion = 0
+                    proportion = 0.0
                 elif hvac_mode == "cooling":
-                    proportion = (float(state_val.get("temp", 0) or 0) - min_temp) / (
-                        max_temp - min_temp
-                    )
+                    proportion = (float(state_val.get("temp", 0) or 0) - min_temp) / (max_temp - min_temp)
                 else:
-                    proportion = (max_temp - float(state_val.get("temp", 0) or 0)) / (
-                        max_temp - min_temp
-                    )
+                    proportion = (max_temp - float(state_val.get("temp", 0) or 0)) / (max_temp - min_temp)
 
                 increment = settings.increment_percentage * proportion
                 percent_open_val += increment
@@ -299,12 +294,7 @@ def adjust_for_minimum_airflow(
         return diff_sum
 
     diff_percentage_sum = _increment(consider_ids, diff_percentage_sum)
-    if (
-        diff_percentage_sum > 0
-        and allow_inactive_if_needed
-        and active_only
-        and inactive_ids
-    ):
+    if diff_percentage_sum > 0 and allow_inactive_if_needed and active_only and inactive_ids:
         diff_percentage_sum = _increment(inactive_ids, diff_percentage_sum)
 
     return calculated_percent_open

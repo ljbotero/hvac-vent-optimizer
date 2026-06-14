@@ -76,7 +76,12 @@ import sys
 
 import pytest
 
-_BALANCE_PATH = pathlib.Path(__file__).resolve().parent.parent / "custom_components" / "hvac_vent_optimizer" / "balance.py"
+_BALANCE_PATH = (
+    pathlib.Path(__file__).resolve().parent.parent
+    / "custom_components"
+    / "hvac_vent_optimizer"
+    / "balance.py"
+)
 _spec = importlib.util.spec_from_file_location("hvo_balance", _BALANCE_PATH)
 balance = importlib.util.module_from_spec(_spec)
 # Register before exec so dataclasses introspection (with `from __future__
@@ -126,20 +131,13 @@ def _is_satisfied(temp_c: float, hyst: float = balance.DEFAULT_HYSTERESIS_C) -> 
 def _expected_targets() -> dict[str, float]:
     """Compute expected open % per room via design A1.1-A1.3."""
     # Step 1 - classify; satisfied rooms -> 0.
-    unsatisfied = {
-        rid: (temp, eff)
-        for rid, (temp, eff) in _ROOM_DATA.items()
-        if not _is_satisfied(temp)
-    }
+    unsatisfied = {rid: (temp, eff) for rid, (temp, eff) in _ROOM_DATA.items() if not _is_satisfied(temp)}
     # Step 2 - bottleneck horizon. rate_i(1.0) = e_i * flow(1.0) = e_i.
-    taus = {
-        rid: _err(temp) / (eff * _flow(LEAK, 1.0))
-        for rid, (temp, eff) in unsatisfied.items()
-    }
+    taus = {rid: _err(temp) / (eff * _flow(LEAK, 1.0)) for rid, (temp, eff) in unsatisfied.items()}
     tau_star = max(taus.values())
 
     # Step 3 - throttle the rest to finish at tau*.
-    targets: dict[str, float] = {rid: 0.0 for rid in _ROOM_DATA}
+    targets: dict[str, float] = dict.fromkeys(_ROOM_DATA, 0.0)
     for rid, (temp, eff) in unsatisfied.items():
         required_rate = _err(temp) / tau_star
         required_flow = required_rate / eff

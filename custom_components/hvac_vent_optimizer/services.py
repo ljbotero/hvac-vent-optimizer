@@ -1,4 +1,5 @@
 """Service handlers for HVAC Vent Optimizer."""
+
 from __future__ import annotations
 
 import json
@@ -8,18 +9,19 @@ from typing import Any
 
 import voluptuous as vol
 from homeassistant.core import HomeAssistant, ServiceCall
+
 try:
     from homeassistant.core import SupportsResponse  # type: ignore
-except Exception:  # pragma: no cover - older HA versions
+except Exception:  # noqa: BLE001  # pragma: no cover - older HA versions lack SupportsResponse
     SupportsResponse = None
 from homeassistant.components import persistent_notification
 from homeassistant.util import json as json_util
 
 from .const import (
     CONF_ACTIVE,
-    CONF_ENTRY_ID,
     CONF_EFFICIENCY_PATH,
     CONF_EFFICIENCY_PAYLOAD,
+    CONF_ENTRY_ID,
     CONF_HOLD_UNTIL,
     CONF_ROOM_ID,
     CONF_SET_POINT_C,
@@ -30,8 +32,8 @@ from .const import (
     DOMAIN,
     SERVICE_EXPORT_EFFICIENCY,
     SERVICE_IMPORT_EFFICIENCY,
-    SERVICE_RUN_DAB,
     SERVICE_REFRESH_DEVICES,
+    SERVICE_RUN_DAB,
     SERVICE_SET_ROOM_ACTIVE,
     SERVICE_SET_ROOM_SETPOINT,
     SERVICE_SET_STRUCTURE_MODE,
@@ -142,7 +144,7 @@ async def async_register_services(hass: HomeAssistant) -> None:
 
         try:
             await coordinator.async_set_room_active(room_id, call.data[CONF_ACTIVE])
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             _LOGGER.exception("Failed to set room active: %s", err)
             persistent_notification.async_create(
                 hass,
@@ -156,7 +158,7 @@ async def async_register_services(hass: HomeAssistant) -> None:
             return
         try:
             await coordinator.async_run_dab(call.data.get(CONF_THERMOSTAT_ENTITY))
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             _LOGGER.exception("Failed to run DAB: %s", err)
             persistent_notification.async_create(
                 hass,
@@ -178,11 +180,9 @@ async def async_register_services(hass: HomeAssistant) -> None:
             _LOGGER.error("Flair API client not available for set_structure_mode")
             return
         try:
-            await coordinator.api.async_set_structure_mode(
-                structure_id, call.data[CONF_STRUCTURE_MODE]
-            )
+            await coordinator.api.async_set_structure_mode(structure_id, call.data[CONF_STRUCTURE_MODE])
             await coordinator.async_request_refresh()
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             _LOGGER.exception("Failed to set structure mode: %s", err)
             persistent_notification.async_create(
                 hass,
@@ -216,7 +216,7 @@ async def async_register_services(hass: HomeAssistant) -> None:
                 call.data.get(CONF_HOLD_UNTIL),
             )
             await coordinator.async_request_refresh()
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             _LOGGER.exception("Failed to set room setpoint: %s", err)
             persistent_notification.async_create(
                 hass,
@@ -232,7 +232,7 @@ async def async_register_services(hass: HomeAssistant) -> None:
             raise ValueError("refresh_devices is not available in Manual mode")
         try:
             await coordinator.async_request_refresh()
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             _LOGGER.exception("Failed to refresh devices: %s", err)
             persistent_notification.async_create(
                 hass,
@@ -259,7 +259,7 @@ async def async_register_services(hass: HomeAssistant) -> None:
                 _LOGGER.info("Exported efficiency data to %s", path)
                 return {"saved_to": path}
             return payload
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             _LOGGER.exception("Failed to export efficiency data: %s", err)
             persistent_notification.async_create(
                 hass,
@@ -286,7 +286,7 @@ async def async_register_services(hass: HomeAssistant) -> None:
                     call.data.get(CONF_EFFICIENCY_PATH),
                     "",
                 )
-                if not os.path.exists(path):
+                if not await hass.async_add_executor_job(os.path.exists, path):
                     raise FileNotFoundError(path)
                 payload = await hass.async_add_executor_job(json_util.load_json, path)
             result = await coordinator.async_import_efficiency(payload)
@@ -296,7 +296,7 @@ async def async_register_services(hass: HomeAssistant) -> None:
                 result["applied"],
                 result["unmatched"],
             )
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             _LOGGER.exception("Failed to import efficiency data: %s", err)
             persistent_notification.async_create(
                 hass,
@@ -357,9 +357,7 @@ async def async_register_services(hass: HomeAssistant) -> None:
 async def async_unregister_services(hass: HomeAssistant) -> None:
     """Unregister services if no entries remain."""
     domain_data = hass.data.get(DOMAIN, {})
-    remaining = [
-        value for key, value in domain_data.items() if isinstance(value, FlairCoordinator)
-    ]
+    remaining = [value for key, value in domain_data.items() if isinstance(value, FlairCoordinator)]
     if remaining:
         return
 
@@ -382,9 +380,7 @@ def _get_coordinator(hass: HomeAssistant, entry_id: str | None) -> FlairCoordina
         _LOGGER.error("No coordinator found for entry_id=%s", entry_id)
         return None
 
-    coordinators = [
-        value for value in domain_data.values() if isinstance(value, FlairCoordinator)
-    ]
+    coordinators = [value for value in domain_data.values() if isinstance(value, FlairCoordinator)]
     if len(coordinators) == 1:
         return coordinators[0]
 
@@ -402,9 +398,8 @@ def _resolve_efficiency_path(hass: HomeAssistant, path: str | None, default_name
     base_real = os.path.realpath(base_path)
     path_real = os.path.realpath(path)
 
-    if os.path.commonpath([base_real, path_real]) != base_real:
-        if not hass.config.is_allowed_path(path_real):
-            raise ValueError("Path is not allowed by Home Assistant")
+    if os.path.commonpath([base_real, path_real]) != base_real and not hass.config.is_allowed_path(path_real):
+        raise ValueError("Path is not allowed by Home Assistant")
 
     return path_real
 

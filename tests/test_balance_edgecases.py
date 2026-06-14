@@ -33,7 +33,12 @@ import importlib.util
 import pathlib
 import sys
 
-_BALANCE_PATH = pathlib.Path(__file__).resolve().parent.parent / "custom_components" / "hvac_vent_optimizer" / "balance.py"
+_BALANCE_PATH = (
+    pathlib.Path(__file__).resolve().parent.parent
+    / "custom_components"
+    / "hvac_vent_optimizer"
+    / "balance.py"
+)
 _spec = importlib.util.spec_from_file_location("hvo_balance", _BALANCE_PATH)
 balance = importlib.util.module_from_spec(_spec)
 # Register before exec so dataclasses introspection (with `from __future__
@@ -129,30 +134,22 @@ class TestAllSatisfied:
     def test_all_pre_floor_targets_are_zero(self):
         # The safety floor (minimum airflow) is Task 10; the pure A1 result
         # before the floor must drive every satisfied vent to 0 %.
-        result = balance.allocate(
-            self._all_satisfied_rooms(), SETPOINT_C, balance.MODE_COOLING, _settings()
-        )
+        result = balance.allocate(self._all_satisfied_rooms(), SETPOINT_C, balance.MODE_COOLING, _settings())
         assert result.targets == {"A": 0.0, "B": 0.0, "C": 0.0}
 
     def test_all_satisfied_no_airflow_limited_and_floor_not_binding(self):
-        result = balance.allocate(
-            self._all_satisfied_rooms(), SETPOINT_C, balance.MODE_COOLING, _settings()
-        )
+        result = balance.allocate(self._all_satisfied_rooms(), SETPOINT_C, balance.MODE_COOLING, _settings())
         assert result.airflow_limited == frozenset()
         assert result.floor_binding is False
 
     def test_all_satisfied_predicted_spread_is_zero(self):
         # Satisfied temps are clamped at setpoint in the projection, so leak
         # drift cannot inflate spread; all land at setpoint => spread 0.
-        result = balance.allocate(
-            self._all_satisfied_rooms(), SETPOINT_C, balance.MODE_COOLING, _settings()
-        )
+        result = balance.allocate(self._all_satisfied_rooms(), SETPOINT_C, balance.MODE_COOLING, _settings())
         assert result.predicted_spread_c == 0.0
 
     def test_all_satisfied_does_not_crash_and_finishes_are_zero(self):
-        result = balance.allocate(
-            self._all_satisfied_rooms(), SETPOINT_C, balance.MODE_COOLING, _settings()
-        )
+        result = balance.allocate(self._all_satisfied_rooms(), SETPOINT_C, balance.MODE_COOLING, _settings())
         assert all(v == 0.0 for v in result.predicted_finish_min.values())
 
 
@@ -227,14 +224,7 @@ class TestModeChange:
             _room("Cold", temp_c=23.0, efficiency=0.02),
         ]
         balance.allocate(rooms, SETPOINT_C, balance.MODE_COOLING, _settings())
-        heating_after_cooling = balance.allocate(
-            rooms, SETPOINT_C, balance.MODE_HEATING, _settings()
-        )
-        heating_alone = balance.allocate(
-            rooms, SETPOINT_C, balance.MODE_HEATING, _settings()
-        )
+        heating_after_cooling = balance.allocate(rooms, SETPOINT_C, balance.MODE_HEATING, _settings())
+        heating_alone = balance.allocate(rooms, SETPOINT_C, balance.MODE_HEATING, _settings())
         assert heating_after_cooling.targets == heating_alone.targets
-        assert (
-            heating_after_cooling.predicted_finish_min
-            == heating_alone.predicted_finish_min
-        )
+        assert heating_after_cooling.predicted_finish_min == heating_alone.predicted_finish_min

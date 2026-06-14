@@ -65,9 +65,7 @@ def _build(
     vents = {}
     assignments = {}
     for r in rooms:
-        vents[r["id"]] = _vent(
-            r["id"], f"room_{r['id']}", r["name"], r["temp"], r["active"], r["open"]
-        )
+        vents[r["id"]] = _vent(r["id"], f"room_{r['id']}", r["name"], r["temp"], r["active"], r["open"])
         assignments[r["id"]] = {
             const.CONF_THERMOSTAT_ENTITY: thermostat,
             const.CONF_TEMP_SENSOR_ENTITY: None,
@@ -180,9 +178,9 @@ def test_balancing_move_within_cooldown_is_held():
 
     _run(coord, thermostat, data)
     calls = _calls(api)
-    assert "hot" not in calls, (
-        "a balancing move the safety floor did not force must respect the cooldown (be held)"
-    )
+    assert (
+        "hot" not in calls
+    ), "a balancing move the safety floor did not force must respect the cooldown (be held)"
 
 
 def test_balancing_move_commanded_when_not_in_cooldown():
@@ -259,6 +257,6 @@ def test_floor_pad_close_is_held_for_legacy_strategy():
     _run(coord, thermostat, data)
     calls = _calls(api)
     # mid must never be force-closed by the legacy safety padding while in cooldown.
-    assert calls.get("mid", 0) == 0 or "mid" not in calls, (
-        "legacy floor padding must not force a close that bypasses the cooldown"
-    )
+    assert (
+        calls.get("mid", 0) == 0 or "mid" not in calls
+    ), "legacy floor padding must not force a close that bypasses the cooldown"

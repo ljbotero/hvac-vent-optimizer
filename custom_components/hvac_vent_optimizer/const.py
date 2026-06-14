@@ -1,4 +1,5 @@
 ﻿"""Constants for HVAC Vent Optimizer integration."""
+
 from __future__ import annotations
 
 DOMAIN = "hvac_vent_optimizer"

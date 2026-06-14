@@ -874,3 +874,213 @@ def seed_room_model_from_v1(
                 except (TypeError, ValueError):
                     continue
     return model
+
+
+# ===========================================================================
+# Door-leakage residual learning (R26 / R27 / R28; decisions D10-D12)
+# ===========================================================================
+# A learned, per-room, per-mode multiplicative residual on the room's
+# *door-closed* reference rate, replacing the flat ``context.DOOR_FACTOR = 0.9``
+# magic number. The quantity learned is the ratio
+# ``factor = rate_door_open / rate_door_closed`` (R26.1/D10): a leaky room shows a
+# large rate degradation (factor near the lower clamp) and a tight interior door
+# shows almost none (factor near 1.0). It mirrors the room-efficiency learner
+# above (adaptive-alpha EMA, sample-count confidence gate, graceful fallback) and
+# stays pure so it is unit-testable in isolation (R26.2).
+#
+# Bounds (R28.1): the factor is clamped to ``[DOOR_FACTOR_MIN, DOOR_FACTOR_MAX]``
+# so an open door can only slow (never speed) conditioning. Until a mode's cell
+# is trusted the resolution falls back to ``DOOR_FACTOR_DEFAULT`` (== the legacy
+# constant), so a cold install is behavior-identical to today (R27.4).
+
+# Lower clamp; an open door can only slow conditioning, never speed it.
+DOOR_FACTOR_MIN: float = 0.5
+
+# Upper clamp; an open door never speeds conditioning (non-amplifying, R28.1).
+DOOR_FACTOR_MAX: float = 1.0
+
+# Legacy constant; cold-start fallback (== the old ``context.DOOR_FACTOR``).
+# Sits inside ``[DOOR_FACTOR_MIN, DOOR_FACTOR_MAX]``.
+DOOR_FACTOR_DEFAULT: float = 0.9
+
+# Door-open samples a mode's cell must accumulate before its learned factor is
+# trusted over the fallback. Mirrors :data:`REGIME_MIN_N`; boundary inclusive.
+DOOR_MIN_N: int = 5
+
+
+# ---------------------------------------------------------------------------
+# Mutable model types (align with persistence schema; R27.1 per-mode)
+# ---------------------------------------------------------------------------
+@dataclass
+class DoorFactorCell:
+    """One mode's learned door-leakage multiplier EMA + running sample count.
+
+    ``factor`` is ``None`` until the first door-open sample seeds the cell; ``n``
+    is the number of door-open samples folded in so far (the confidence gate
+    counter, :data:`DOOR_MIN_N`).
+    """
+
+    factor: float | None = None
+    n: int = 0
+
+
+@dataclass
+class DoorFactorModel:
+    """A room's independent cooling/heating door-factor cells.
+
+    Mirrors :class:`RoomEfficiencyModel`: the two cells are fully independent and
+    each advances only on samples observed in its own mode (R27.1), so a per-mode
+    update never bleeds into the other mode.
+    """
+
+    cooling: DoorFactorCell
+    heating: DoorFactorCell
+
+
+# ---------------------------------------------------------------------------
+# Factory
+# ---------------------------------------------------------------------------
+def new_door_factor_model() -> DoorFactorModel:
+    """Build a fresh model with distinct (non-aliased) cooling/heating cells.
+
+    Each cell starts ``factor=None, n=0`` (no door-open sample observed yet), so
+    :func:`resolve_door_factor` falls back to :data:`DOOR_FACTOR_DEFAULT` until a
+    mode's cell is trusted (R27.4). The two cells are distinct objects so a
+    per-mode update never aliases into the other mode (R27.1).
+    """
+    return DoorFactorModel(cooling=DoorFactorCell(), heating=DoorFactorCell())
+
+
+# ---------------------------------------------------------------------------
+# Online learning (R26.3 / R28.2 / R28.3 / R28.5)
+# ---------------------------------------------------------------------------
+def update_door_factor(
+    model: DoorFactorModel,
+    ratio: float | None,
+    mode: str = "cooling",
+) -> DoorFactorModel:
+    """Fold one observed residual ``ratio`` into the chosen ``mode`` cell.
+
+    The coordinator forms the residual ``ratio = sample / reference``; this
+    function only learns it, mirroring :func:`update_room_efficiency`.
+
+    Robustness (R28.3): a ``None`` or non-finite (NaN/inf) ``ratio`` leaves the
+    model completely untouched — no factor change, no ``n`` increment. The ratio
+    is clamped into ``[DOOR_FACTOR_MIN, DOOR_FACTOR_MAX]`` BEFORE the EMA step
+    (R28.2), so an open door can never push the factor above ``1.0``. The first
+    valid sample seeds the cell outright (``factor == clamp(ratio)``, ``n == 1``);
+    thereafter the cell moves toward the clamped ratio via the shared adaptive
+    alpha ``max(RATE_ALPHA_MIN, RATE_ALPHA0/sqrt(n))`` with ``n`` incremented
+    before alpha is computed (R26.3), keeping the EMA bounded and stable for any
+    valid stream (R28.5). Only the passed ``mode`` cell advances; the model is
+    mutated in place and also returned for chaining.
+    """
+    if ratio is None or not math.isfinite(ratio):
+        return model
+
+    r = _clamp(ratio, DOOR_FACTOR_MIN, DOOR_FACTOR_MAX)
+    cell: DoorFactorCell = getattr(model, mode)
+    cell.n += 1
+    cell.factor = _ema_step(cell.factor if cell.n > 1 else None, r, cell.n)
+
+    return model
+
+
+# ---------------------------------------------------------------------------
+# Read-time resolution (R27.1 / R27.2 / R27.3 / R27.4 / R28.1)
+# ---------------------------------------------------------------------------
+def resolve_door_factor(
+    model: DoorFactorModel | None,
+    mode: str = "cooling",
+    *,
+    default: float = DOOR_FACTOR_DEFAULT,
+) -> float:
+    """Resolve the door-leakage factor for ``mode`` via the D12 fallback chain.
+
+    Resolution order (R27.2 / D12), with the result ALWAYS clamped into
+    ``[DOOR_FACTOR_MIN, DOOR_FACTOR_MAX]`` (R28.1):
+
+    1. the requested ``mode`` cell IF it is trusted (``n >= DOOR_MIN_N`` AND a
+       ``factor`` is present) -> ``clamp(cell.factor)``;
+    2. else the other mode's cell IF it is trusted -> ``clamp(other.factor)``
+       (the explicit cross-mode fallback);
+    3. else ``default`` (== :data:`DOOR_FACTOR_DEFAULT` == ``0.9``).
+
+    A ``None`` model (cold install) resolves to ``default`` (R27.4). Resolution
+    is read-only: it never mutates the model, so per-mode independence holds —
+    a cold/noisy cell for one mode never drags a trusted cell of the other mode
+    except through the documented step-2 cross-mode fallback (R27.1 / R27.3).
+    """
+    clamped_default = _clamp(default, DOOR_FACTOR_MIN, DOOR_FACTOR_MAX)
+    if model is None:
+        return clamped_default
+
+    other_mode = "heating" if mode == "cooling" else "cooling"
+    for candidate in (mode, other_mode):
+        cell: DoorFactorCell = getattr(model, candidate)
+        if cell.n >= DOOR_MIN_N and cell.factor is not None:
+            return _clamp(cell.factor, DOOR_FACTOR_MIN, DOOR_FACTOR_MAX)
+
+    return clamped_default
+
+
+# ---------------------------------------------------------------------------
+# Persistence converters (R29.3) — mirror the room-model ``_mode_*`` tolerance
+# ---------------------------------------------------------------------------
+# These define the persisted ``door_factor.<room>.<mode>`` schema and are the
+# single source of truth for the door-factor wire shape, so they are unit-tested
+# directly. ``door_factor_from_dict`` NEVER raises: any malformed/partial input
+# decays to a fresh cell, exactly like ``_mode_from_dict``.
+def _door_cell_to_dict(cell: DoorFactorCell) -> dict:
+    """Serialize one :class:`DoorFactorCell` to its persisted dict shape."""
+    return {
+        "factor": None if cell.factor is None else float(cell.factor),
+        "n": int(cell.n),
+    }
+
+
+def _door_cell_from_dict(data: object) -> DoorFactorCell:
+    """Deserialize one door-factor cell, tolerating garbled ``factor``/``n``.
+
+    A non-dict entry, a missing/garbled ``factor`` (non-numeric or non-finite),
+    or a garbled ``n`` all decay to safe defaults (``factor=None`` / ``n=0``)
+    without raising. An integer ``factor`` is coerced to ``float``.
+    """
+    if not isinstance(data, dict):
+        return DoorFactorCell()
+    raw_factor = data.get("factor")
+    factor: float | None
+    if isinstance(raw_factor, bool) or not isinstance(raw_factor, (int, float)):
+        factor = None
+    else:
+        f = float(raw_factor)
+        factor = f if math.isfinite(f) else None
+    try:
+        n = int(data.get("n", 0) or 0)
+    except (TypeError, ValueError):
+        n = 0
+    return DoorFactorCell(factor=factor, n=n)
+
+
+def door_factor_to_dict(model: DoorFactorModel) -> dict:
+    """Serialize a :class:`DoorFactorModel` to its persisted dict shape."""
+    return {
+        "cooling": _door_cell_to_dict(model.cooling),
+        "heating": _door_cell_to_dict(model.heating),
+    }
+
+
+def door_factor_from_dict(data: object) -> DoorFactorModel:
+    """Deserialize a :class:`DoorFactorModel`; never raises on bad input.
+
+    A non-dict ``data`` (or a missing/garbled mode entry) yields a fresh cell for
+    that mode, so a malformed persisted section always loads to a usable model
+    that resolves to :data:`DOOR_FACTOR_DEFAULT` (R29.3). ``from_dict(to_dict(m))``
+    is lossless for any model (value-equal dataclasses).
+    """
+    if not isinstance(data, dict):
+        return new_door_factor_model()
+    return DoorFactorModel(
+        cooling=_door_cell_from_dict(data.get("cooling")),
+        heating=_door_cell_from_dict(data.get("heating")),
+    )

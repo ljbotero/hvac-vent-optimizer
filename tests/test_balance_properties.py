@@ -62,7 +62,12 @@ from itertools import accumulate
 from hypothesis import assume, given, settings as hyp_settings, strategies as st
 
 # --- Load balance.py standalone (pure module, no HA) -----------------------
-_BALANCE_PATH = pathlib.Path(__file__).resolve().parent.parent / "custom_components" / "hvac_vent_optimizer" / "balance.py"
+_BALANCE_PATH = (
+    pathlib.Path(__file__).resolve().parent.parent
+    / "custom_components"
+    / "hvac_vent_optimizer"
+    / "balance.py"
+)
 _spec = importlib.util.spec_from_file_location("hvo_balance", _BALANCE_PATH)
 balance = importlib.util.module_from_spec(_spec)
 # Register before exec so dataclass introspection (with `from __future__ import
@@ -75,7 +80,12 @@ _spec.loader.exec_module(balance)
 # non-linear ``VentCurve`` model. ``learning.py`` is HA-free, so — like
 # ``balance.py`` above and the sibling ``test_learning_properties.py`` — we load
 # it standalone by absolute path to build random valid curves for the rooms.
-_LEARNING_PATH = pathlib.Path(__file__).resolve().parent.parent / "custom_components" / "hvac_vent_optimizer" / "learning.py"
+_LEARNING_PATH = (
+    pathlib.Path(__file__).resolve().parent.parent
+    / "custom_components"
+    / "hvac_vent_optimizer"
+    / "learning.py"
+)
 _learning_spec = importlib.util.spec_from_file_location("hvo_learning", _LEARNING_PATH)
 learning = importlib.util.module_from_spec(_learning_spec)
 sys.modules[_learning_spec.name] = learning
@@ -418,9 +428,7 @@ def test_property3_bottleneck_saturation(data, settings):
     # Every room achieving tau* (the bottleneck, allowing ties) runs at 100 %.
     # Divisor granularities make the precise aperture 1.0 round to exactly 100.
     bottlenecks = [
-        r
-        for r in unsatisfied
-        if _signed_error(mode, setpoint_c, r.temp_c) / r.efficiency >= tau_star - 1e-9
+        r for r in unsatisfied if _signed_error(mode, setpoint_c, r.temp_c) / r.efficiency >= tau_star - 1e-9
     ]
     assert bottlenecks
     for room in bottlenecks:
@@ -445,21 +453,15 @@ def test_property4_reducing_satisfied_aperture_never_increases_spread(data, sett
 
     # Start from a uniform non-trivial baseline so a reduction is observable.
     baseline = {r.room_id: 80.0 for r in active}
-    satisfied = [
-        r for r in active if balance.is_satisfied(mode, setpoint_c, r.temp_c, 0.0)
-    ]
+    satisfied = [r for r in active if balance.is_satisfied(mode, setpoint_c, r.temp_c, 0.0)]
     assume(satisfied)
 
-    spread_before = balance.predicted_spread(
-        active, baseline, mode, setpoint_c, settings.horizon_min
-    )
+    spread_before = balance.predicted_spread(active, baseline, mode, setpoint_c, settings.horizon_min)
     # Reduce every satisfied room's aperture toward closed.
     reduced = dict(baseline)
     for room in satisfied:
         reduced[room.room_id] = 0.0
-    spread_after = balance.predicted_spread(
-        active, reduced, mode, setpoint_c, settings.horizon_min
-    )
+    spread_after = balance.predicted_spread(active, reduced, mode, setpoint_c, settings.horizon_min)
     assert spread_after <= spread_before + 1e-6
 
 
@@ -683,9 +685,7 @@ def test_property10_gating_soundness(data, settings, floor_requires_open, jitter
         if key in proposed:
             proposed[key] = value
 
-    gate = balance.GateContext(
-        mode=mode, setpoint_c=setpoint_c, floor_requires_open=floor_requires_open
-    )
+    gate = balance.GateContext(mode=mode, setpoint_c=setpoint_c, floor_requires_open=floor_requires_open)
     actual = balance.should_apply(current, proposed, active, settings, gate)
 
     # Re-derive the contract from the same predicted-spread metric the helper
@@ -693,9 +693,7 @@ def test_property10_gating_soundness(data, settings, floor_requires_open, jitter
     if floor_requires_open:
         expected = True
     else:
-        current_spread = balance.predicted_spread(
-            active, current, mode, setpoint_c, settings.horizon_min
-        )
+        current_spread = balance.predicted_spread(active, current, mode, setpoint_c, settings.horizon_min)
         if current_spread <= settings.spread_guardrail_c:
             expected = False
         else:

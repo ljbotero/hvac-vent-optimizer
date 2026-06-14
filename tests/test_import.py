@@ -119,3 +119,93 @@ async def test_v2_payload_import_drops_malformed_vent_effectiveness(make_coordin
     assert "good" in coord._vent_effectiveness
     for bad in ("bad_no_leak", "bad_no_curve", "bad_modes"):
         assert bad not in coord._vent_effectiveness, f"{bad} should be rejected"
+
+
+# ===========================================================================
+# Task 10 — Export/import the learned door_factor section (R29.5)
+# ===========================================================================
+# Mirrors the vent_effectiveness/room_efficiency export/import contract:
+#   * build_efficiency_export() carries a ``door_factor`` section, one entry
+#     per room in ``self._door_factor_models``, serialized via
+#     ``learning.door_factor_to_dict``.
+#   * async_import_efficiency() restores that section into
+#     ``self._door_factor_models`` (decoded tolerantly).
+#   * a payload that OMITS the section stays backward-compatible (every room
+#     resolves to the 0.9 default) and — matching the ``.update()`` semantics
+#     used for room_efficiency/vent_effectiveness — does NOT clear existing
+#     learned door factors.
+from hvac_vent_optimizer.learning import (  # noqa: E402
+    DOOR_MIN_N,
+    door_factor_to_dict,
+    new_door_factor_model,
+    resolve_door_factor,
+    update_door_factor,
+)
+
+
+def _trusted_door_model(ratio: float, mode: str = "cooling"):
+    """Build a door-factor model whose ``mode`` cell is trusted (n >= gate)."""
+    model = new_door_factor_model()
+    for _ in range(DOOR_MIN_N):
+        update_door_factor(model, ratio, mode)
+    return model
+
+
+@pytest.mark.asyncio
+async def test_export_includes_door_factor_section(make_coordinator):
+    """build_efficiency_export must serialize door_factor via door_factor_to_dict."""
+    coord, *_ = make_coordinator()
+    model = _trusted_door_model(0.6, "cooling")
+    coord._door_factor_models = {"Bedroom 2": model}
+
+    export = coord.build_efficiency_export()
+
+    assert "door_factor" in export, "export payload is missing the door_factor section"
+    assert export["door_factor"] == {"Bedroom 2": door_factor_to_dict(model)}
+
+
+@pytest.mark.asyncio
+async def test_import_restores_door_factor_section(make_coordinator):
+    """async_import_efficiency must restore the door_factor section (tolerantly)."""
+    coord, *_ = make_coordinator()
+    learned = _trusted_door_model(0.55, "cooling")
+    payload = {
+        "version": 2,
+        "efficiencyData": {"roomEfficiencies": [], "globalRates": {}},
+        "door_factor": {
+            "Bedroom 2": door_factor_to_dict(learned),
+            # A garbled entry must be tolerated, never raise, and resolve to 0.9
+            # (whether dropped or decoded to a fresh, untrusted cell).
+            "garbled": ["not", "a", "dict"],
+        },
+    }
+
+    await coord.async_import_efficiency(payload)
+
+    assert "Bedroom 2" in coord._door_factor_models, "door_factor section was not restored"
+    restored = coord._door_factor_models["Bedroom 2"]
+    assert resolve_door_factor(restored, "cooling") == pytest.approx(resolve_door_factor(learned, "cooling"))
+    assert resolve_door_factor(coord._door_factor_models.get("garbled"), "cooling") == 0.9
+
+
+@pytest.mark.asyncio
+async def test_import_without_door_factor_is_backward_compatible(make_coordinator):
+    """A payload omitting door_factor: rooms resolve to 0.9 and learned entries survive."""
+    coord, *_ = make_coordinator()
+    seeded = _trusted_door_model(0.7, "cooling")
+    coord._door_factor_models = {"Master Bedroom": seeded}
+
+    payload = {
+        "version": 2,
+        "efficiencyData": {"roomEfficiencies": [], "globalRates": {}},
+        # no door_factor section (pre-feature export)
+    }
+    await coord.async_import_efficiency(payload)
+
+    # .update() semantics: an omitted section never clears existing learned data.
+    assert "Master Bedroom" in coord._door_factor_models
+    assert resolve_door_factor(coord._door_factor_models["Master Bedroom"], "cooling") == pytest.approx(
+        resolve_door_factor(seeded, "cooling")
+    )
+    # An unknown room (no model) resolves to the legacy 0.9 default.
+    assert resolve_door_factor(coord._door_factor_models.get("Unknown Room"), "cooling") == 0.9

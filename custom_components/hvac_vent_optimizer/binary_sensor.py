@@ -1,7 +1,8 @@
 """Binary sensor platform for Flair occupancy."""
+
 from __future__ import annotations
 
-from homeassistant.components.binary_sensor import BinarySensorEntity, BinarySensorDeviceClass
+from homeassistant.components.binary_sensor import BinarySensorDeviceClass, BinarySensorEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
@@ -12,8 +13,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     pucks = coordinator.data.get("pucks", {}) if coordinator.data else {}
     vents = coordinator.data.get("vents", {}) if coordinator.data else {}
     entities: list[BinarySensorEntity] = [
-        FlairPuckOccupancyBinarySensor(coordinator, entry.entry_id, puck_id)
-        for puck_id in pucks.keys()
+        FlairPuckOccupancyBinarySensor(coordinator, entry.entry_id, puck_id) for puck_id in pucks
     ]
 
     # Per-room airflow-limited indicator (R5.4). One per room served by a vent.
@@ -24,9 +24,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         if room_id and room_id not in rooms:
             rooms[room_id] = room
     for room_id in rooms:
-        entities.append(
-            FlairRoomAirflowLimitedBinarySensor(coordinator, entry.entry_id, room_id)
-        )
+        entities.append(FlairRoomAirflowLimitedBinarySensor(coordinator, entry.entry_id, room_id))
 
     async_add_entities(entities)
 

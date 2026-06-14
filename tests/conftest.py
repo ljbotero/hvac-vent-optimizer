@@ -9,9 +9,9 @@ implement the surface the component actually touches.
 These stubs live only in the test process; they are never shipped or imported
 by Home Assistant at runtime.
 """
+
 from __future__ import annotations
 
-import asyncio
 import sys
 import types
 from datetime import datetime
@@ -21,8 +21,8 @@ from pathlib import Path
 # The integration ships under ``custom_components/hvac_vent_optimizer`` (HACS
 # layout). Put that ``custom_components`` directory on ``sys.path`` so the tests
 # can ``import hvac_vent_optimizer`` directly without pulling in Home Assistant.
-_REPO_ROOT = Path(__file__).resolve().parent.parent        # repo root (contains custom_components/)
-_PARENT = _REPO_ROOT / "custom_components"                 # dir that *contains* the package
+_REPO_ROOT = Path(__file__).resolve().parent.parent  # repo root (contains custom_components/)
+_PARENT = _REPO_ROOT / "custom_components"  # dir that *contains* the package
 if str(_PARENT) not in sys.path:
     sys.path.insert(0, str(_PARENT))
 # Also expose the repo root so ``from tests._fakes import ...`` resolves.
@@ -50,11 +50,9 @@ def _install_aiohttp() -> None:
         return
     aiohttp = _module("aiohttp")
 
-    class ClientError(Exception):
-        ...
+    class ClientError(Exception): ...
 
-    class ContentTypeError(ClientError):
-        ...
+    class ContentTypeError(ClientError): ...
 
     class ClientTimeout:
         def __init__(self, total=None):
@@ -81,8 +79,7 @@ def _install_voluptuous() -> None:
         return
     vol = _module("voluptuous")
 
-    class Invalid(Exception):
-        ...
+    class Invalid(Exception): ...
 
     class _Marker:
         def __init__(self, schema, default=None, description=None):
@@ -95,11 +92,9 @@ def _install_voluptuous() -> None:
         def __eq__(self, other):
             return isinstance(other, _Marker) and other.schema == self.schema
 
-    class Required(_Marker):
-        ...
+    class Required(_Marker): ...
 
-    class Optional(_Marker):
-        ...
+    class Optional(_Marker): ...
 
     class Schema:
         def __init__(self, schema=None, **kwargs):
@@ -185,8 +180,7 @@ def _install_homeassistant() -> None:
     # homeassistant.core
     core = _ensure("homeassistant.core")
 
-    class HomeAssistant:
-        ...
+    class HomeAssistant: ...
 
     class ServiceCall:
         def __init__(self, data=None):
@@ -207,8 +201,7 @@ def _install_homeassistant() -> None:
     # homeassistant.config_entries
     config_entries = _ensure("homeassistant.config_entries")
 
-    class ConfigEntry:
-        ...
+    class ConfigEntry: ...
 
     class _FlowResultMixin:
         """Minimal flow-result helpers mirroring HA's FlowHandler surface.
@@ -221,8 +214,9 @@ def _install_homeassistant() -> None:
         def async_create_entry(self, *, title="", data=None, **kwargs):
             return {"type": "create_entry", "title": title, "data": data or {}}
 
-        def async_show_form(self, *, step_id=None, data_schema=None, errors=None,
-                            description_placeholders=None, **kwargs):
+        def async_show_form(
+            self, *, step_id=None, data_schema=None, errors=None, description_placeholders=None, **kwargs
+        ):
             return {
                 "type": "form",
                 "step_id": step_id,
@@ -249,8 +243,7 @@ def _install_homeassistant() -> None:
             ...
 
     class ConfigFlow(_FlowResultMixin):
-        def __init_subclass__(cls, **kwargs):
-            ...
+        def __init_subclass__(cls, **kwargs): ...
 
     config_entries.ConfigFlow = ConfigFlow
 
@@ -269,8 +262,7 @@ def _install_homeassistant() -> None:
     # homeassistant.components.climate + .const
     climate = _ensure("homeassistant.components.climate")
 
-    class ClimateEntity:
-        ...
+    class ClimateEntity: ...
 
     climate.ClimateEntity = ClimateEntity
 
@@ -361,8 +353,7 @@ def _install_homeassistant() -> None:
         async def async_added_to_hass(self):
             return None
 
-    class UpdateFailed(Exception):
-        ...
+    class UpdateFailed(Exception): ...
 
     update_coordinator.DataUpdateCoordinator = DataUpdateCoordinator
     update_coordinator.CoordinatorEntity = CoordinatorEntity
@@ -387,8 +378,7 @@ def _install_homeassistant() -> None:
     # homeassistant.components.number / .sensor / restore_state (number.py)
     number = _ensure("homeassistant.components.number")
 
-    class NumberEntity:
-        ...
+    class NumberEntity: ...
 
     class NumberMode:
         BOX = "box"
@@ -397,8 +387,7 @@ def _install_homeassistant() -> None:
 
     sensor = _ensure("homeassistant.components.sensor")
 
-    class SensorEntity:
-        ...
+    class SensorEntity: ...
 
     import dataclasses as _dc
 
@@ -445,8 +434,7 @@ def _install_homeassistant() -> None:
     # Remaining platform bases (so every platform module is importable).
     binary_sensor = _ensure("homeassistant.components.binary_sensor")
 
-    class BinarySensorEntity:
-        ...
+    class BinarySensorEntity: ...
 
     class BinarySensorDeviceClass:
         OCCUPANCY = "occupancy"
@@ -457,15 +445,13 @@ def _install_homeassistant() -> None:
 
     switch = _ensure("homeassistant.components.switch")
 
-    class SwitchEntity:
-        ...
+    class SwitchEntity: ...
 
     switch.SwitchEntity = SwitchEntity
 
     cover = _ensure("homeassistant.components.cover")
 
-    class CoverEntity:
-        ...
+    class CoverEntity: ...
 
     cover.CoverEntity = CoverEntity
 
@@ -476,15 +462,13 @@ def _install_homeassistant() -> None:
         def __init__(self, config=None):
             self.config = config
 
-    class EntitySelector(_SelectorBase):
-        ...
+    class EntitySelector(_SelectorBase): ...
 
     class EntitySelectorConfig(dict):
         def __init__(self, **kwargs):
             super().__init__(**kwargs)
 
-    class SelectSelector(_SelectorBase):
-        ...
+    class SelectSelector(_SelectorBase): ...
 
     class SelectSelectorConfig(dict):
         def __init__(self, **kwargs):
@@ -525,8 +509,7 @@ def _build_coordinator(*, options=None, data=None, unit="°C"):
     if options:
         opts.update(options)
     entry = FakeEntry(
-        data={const.CONF_STRUCTURE_ID: "s1", const.CONF_CLIENT_ID: "id",
-              const.CONF_CLIENT_SECRET: "sec"},
+        data={const.CONF_STRUCTURE_ID: "s1", const.CONF_CLIENT_ID: "id", const.CONF_CLIENT_SECRET: "sec"},
         options=opts,
     )
     hass = FakeHass(unit=unit)
@@ -569,8 +552,7 @@ def ready_coordinator():
     }
     options = {
         const.CONF_VENT_ASSIGNMENTS: {
-            vent_id: {const.CONF_THERMOSTAT_ENTITY: thermostat,
-                      const.CONF_TEMP_SENSOR_ENTITY: None},
+            vent_id: {const.CONF_THERMOSTAT_ENTITY: thermostat, const.CONF_TEMP_SENSOR_ENTITY: None},
         },
         const.CONF_CONTROL_STRATEGY: "hybrid",
     }

@@ -4,6 +4,7 @@ HA core converts the service value into the entity's native temperature_unit
 (Celsius here) before calling async_set_temperature. The integration must pass
 that value straight through to the Flair API.
 """
+
 from __future__ import annotations
 
 import types

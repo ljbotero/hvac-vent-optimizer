@@ -4,6 +4,7 @@ This guards against wrong-import-location regressions (e.g. importing a symbol
 from a module that doesn't export it) that would otherwise only surface at
 runtime on the real Home Assistant instance.
 """
+
 from __future__ import annotations
 
 import importlib
@@ -11,7 +12,7 @@ import importlib
 import pytest
 
 PLATFORM_MODULES = [
-    "hvac_vent_optimizer",            # package __init__ (pulls api/const/coordinator/services)
+    "hvac_vent_optimizer",  # package __init__ (pulls api/const/coordinator/services)
     "hvac_vent_optimizer.api",
     "hvac_vent_optimizer.const",
     "hvac_vent_optimizer.coordinator",

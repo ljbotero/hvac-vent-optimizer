@@ -1,13 +1,14 @@
 """Flair API client."""
+
 from __future__ import annotations
 
 import asyncio
 import json
-from datetime import datetime, timedelta, timezone
+import logging
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import aiohttp
-import logging
 
 from .utils import AsyncRateLimiter
 
@@ -27,8 +28,7 @@ class FlairApi:
 
     BASE_URL = "https://api.flair.co"
     _SCOPES_FULL = (
-        "vents.view vents.edit structures.view structures.edit "
-        "pucks.view pucks.edit rooms.view rooms.edit"
+        "vents.view vents.edit structures.view structures.edit " "pucks.view pucks.edit rooms.view rooms.edit"
     )
     _SCOPES_BASE = "vents.view vents.edit structures.view structures.edit pucks.view pucks.edit"
 
@@ -46,9 +46,8 @@ class FlairApi:
     async def async_authenticate(self) -> None:
         """Authenticate with Flair API using client credentials."""
         async with self._auth_lock:
-            if self._access_token and self._token_expires_at:
-                if datetime.now(timezone.utc) < self._token_expires_at:
-                    return
+            if self._access_token and self._token_expires_at and datetime.now(UTC) < self._token_expires_at:
+                return
 
             async def _request_token(scope: str) -> dict[str, Any]:
                 payload = {
@@ -73,16 +72,14 @@ class FlairApi:
                             raise FlairApiAuthError("Invalid Flair credentials")
                         body = await resp.text()
                         if resp.status >= 400:
-                            raise FlairApiError(
-                                f"Authentication failed: HTTP {resp.status}: {body}"
-                            )
+                            raise FlairApiError(f"Authentication failed: HTTP {resp.status}: {body}")
                         if not body:
                             return {}
                         try:
                             return json.loads(body)
                         except json.JSONDecodeError:
                             return {}
-                except asyncio.TimeoutError as err:
+                except TimeoutError as err:
                     raise FlairApiError("Authentication request timed out") from err
                 except aiohttp.ClientError as err:
                     raise FlairApiError(f"Authentication request failed: {err}") from err
@@ -102,7 +99,7 @@ class FlairApi:
 
             self._access_token = token
             expires_in = int(data.get("expires_in", 3600))
-            self._token_expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in - 60)
+            self._token_expires_at = datetime.now(UTC) + timedelta(seconds=expires_in - 60)
 
     def _get_rate_limiter(self, path: str) -> AsyncRateLimiter:
         # Flair documents different limits; treat any search endpoint as "search".
@@ -155,9 +152,7 @@ class FlairApi:
                     return await resp.json()
                 except (aiohttp.ContentTypeError, json.JSONDecodeError) as err:
                     body = await resp.text()
-                    raise FlairApiError(
-                        f"Flair API non-JSON response: HTTP {resp.status}: {body}"
-                    ) from err
+                    raise FlairApiError(f"Flair API non-JSON response: HTTP {resp.status}: {body}") from err
 
     async def async_get_structures(self) -> list[dict[str, str]]:
         """Return a list of structures with id and name."""

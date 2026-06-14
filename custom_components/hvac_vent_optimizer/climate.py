@@ -1,5 +1,8 @@
 """Climate platform for Flair room setpoint control."""
+
 from __future__ import annotations
+
+from typing import ClassVar
 
 from homeassistant.components.climate import ClimateEntity
 from homeassistant.components.climate.const import ClimateEntityFeature, HVACMode
@@ -27,10 +30,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         if room_id and room_id not in rooms:
             rooms[room_id] = room
 
-    entities = [
-        FlairRoomClimate(coordinator, entry.entry_id, room_id)
-        for room_id in rooms.keys()
-    ]
+    entities = [FlairRoomClimate(coordinator, entry.entry_id, room_id) for room_id in rooms]
     async_add_entities(entities)
 
 
@@ -38,7 +38,7 @@ class FlairRoomClimate(CoordinatorEntity, ClimateEntity):
     """Room setpoint control as a climate entity."""
 
     _attr_supported_features = ClimateEntityFeature.TARGET_TEMPERATURE
-    _attr_hvac_modes = [HVACMode.AUTO]
+    _attr_hvac_modes: ClassVar[list[HVACMode]] = [HVACMode.AUTO]
     _attr_hvac_mode = HVACMode.AUTO
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
 

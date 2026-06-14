@@ -1,4 +1,5 @@
 """Config flow for HVAC Vent Optimizer integration."""
+
 from __future__ import annotations
 
 import logging
@@ -94,7 +95,7 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 
-class HvacVentOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+class HvacVentOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: ignore[call-arg]
     """Handle a config flow for HVAC Vent Optimizer."""
 
     # v2 (Task 27): the default control strategy flips to ``balance``. The bump
@@ -251,9 +252,7 @@ class HvacVentOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
 
         data_schema: dict[Any, Any] = {}
-        thermostat_selector = selector.EntitySelector(
-            selector.EntitySelectorConfig(domain="climate")
-        )
+        thermostat_selector = selector.EntitySelector(selector.EntitySelectorConfig(domain="climate"))
         temp_sensor_selector = selector.EntitySelector(
             selector.EntitySelectorConfig(domain="sensor", device_class="temperature")
         )
@@ -398,9 +397,7 @@ class HvacVentOptimizerOptionsFlow(config_entries.OptionsFlowWithConfigEntry):
                         CONF_MANUAL_VENT_COUNT,
                         default=self.config_entry.options.get(
                             CONF_MANUAL_VENT_COUNT,
-                            self.config_entry.data.get(
-                                CONF_MANUAL_VENT_COUNT, DEFAULT_MANUAL_VENT_COUNT
-                            ),
+                            self.config_entry.data.get(CONF_MANUAL_VENT_COUNT, DEFAULT_MANUAL_VENT_COUNT),
                         ),
                     ): vol.All(vol.Coerce(int), vol.Range(min=1, max=50)),
                 }
@@ -445,9 +442,7 @@ class HvacVentOptimizerOptionsFlow(config_entries.OptionsFlowWithConfigEntry):
             options[CONF_VENT_ASSIGNMENTS] = vent_assignments
             return self.async_create_entry(title="", data=options)
 
-        thermostat_selector = selector.EntitySelector(
-            selector.EntitySelectorConfig(domain="climate")
-        )
+        thermostat_selector = selector.EntitySelector(selector.EntitySelectorConfig(domain="climate"))
         temp_sensor_selector = selector.EntitySelector(
             selector.EntitySelectorConfig(domain="sensor", device_class="temperature")
         )
@@ -456,9 +451,15 @@ class HvacVentOptimizerOptionsFlow(config_entries.OptionsFlowWithConfigEntry):
         for i in range(1, count + 1):
             vent_id = f"manual_{i}"
             existing_vent = existing.get(vent_id, {})
-            data_schema[vol.Required(f"manual_{i}_name", default=existing_vent.get("name", f"Vent {i}"))] = str
-            data_schema[vol.Required(f"manual_{i}_thermostat", default=existing_vent.get(CONF_THERMOSTAT_ENTITY))] = thermostat_selector
-            data_schema[vol.Required(f"manual_{i}_temp_sensor", default=existing_vent.get(CONF_TEMP_SENSOR_ENTITY))] = temp_sensor_selector
+            data_schema[vol.Required(f"manual_{i}_name", default=existing_vent.get("name", f"Vent {i}"))] = (
+                str
+            )
+            data_schema[
+                vol.Required(f"manual_{i}_thermostat", default=existing_vent.get(CONF_THERMOSTAT_ENTITY))
+            ] = thermostat_selector
+            data_schema[
+                vol.Required(f"manual_{i}_temp_sensor", default=existing_vent.get(CONF_TEMP_SENSOR_ENTITY))
+            ] = temp_sensor_selector
 
         return self.async_show_form(
             step_id="manual_vents",
@@ -479,12 +480,8 @@ class HvacVentOptimizerOptionsFlow(config_entries.OptionsFlowWithConfigEntry):
                     CONF_VENT_GRANULARITY: int(user_input[CONF_VENT_GRANULARITY]),
                     CONF_POLL_INTERVAL_ACTIVE: user_input[CONF_POLL_INTERVAL_ACTIVE],
                     CONF_POLL_INTERVAL_IDLE: user_input[CONF_POLL_INTERVAL_IDLE],
-                    CONF_INITIAL_EFFICIENCY_PERCENT: user_input[
-                        CONF_INITIAL_EFFICIENCY_PERCENT
-                    ],
-                    CONF_NOTIFY_EFFICIENCY_CHANGES: user_input[
-                        CONF_NOTIFY_EFFICIENCY_CHANGES
-                    ],
+                    CONF_INITIAL_EFFICIENCY_PERCENT: user_input[CONF_INITIAL_EFFICIENCY_PERCENT],
+                    CONF_NOTIFY_EFFICIENCY_CHANGES: user_input[CONF_NOTIFY_EFFICIENCY_CHANGES],
                     CONF_LOG_EFFICIENCY_CHANGES: user_input[CONF_LOG_EFFICIENCY_CHANGES],
                     CONF_CONTROL_STRATEGY: user_input[CONF_CONTROL_STRATEGY],
                     CONF_MIN_ADJUSTMENT_PERCENT: user_input[CONF_MIN_ADJUSTMENT_PERCENT],
@@ -493,15 +490,11 @@ class HvacVentOptimizerOptionsFlow(config_entries.OptionsFlowWithConfigEntry):
                     CONF_DEADBAND_PERCENT: user_input[CONF_DEADBAND_PERCENT],
                     CONF_DEVIATION_THRESHOLD: user_input[CONF_DEVIATION_THRESHOLD],
                     CONF_MAX_RECALC_PER_CYCLE: user_input[CONF_MAX_RECALC_PER_CYCLE],
-                    CONF_MAX_ADJUSTMENT_BATCHES_PER_CYCLE: user_input[
-                        CONF_MAX_ADJUSTMENT_BATCHES_PER_CYCLE
-                    ],
+                    CONF_MAX_ADJUSTMENT_BATCHES_PER_CYCLE: user_input[CONF_MAX_ADJUSTMENT_BATCHES_PER_CYCLE],
                     CONF_MAX_ADJUSTMENT_BATCHES_PER_WINDOW: user_input[
                         CONF_MAX_ADJUSTMENT_BATCHES_PER_WINDOW
                     ],
-                    CONF_ADJUSTMENT_WINDOW_MINUTES: user_input[
-                        CONF_ADJUSTMENT_WINDOW_MINUTES
-                    ],
+                    CONF_ADJUSTMENT_WINDOW_MINUTES: user_input[CONF_ADJUSTMENT_WINDOW_MINUTES],
                     # New balance (DAB v2) tunables — clamped to documented
                     # ranges (R18.2) so a bad value can never reach the allocator.
                     CONF_SAFETY_FLOOR_PCT: _clamp_int(
@@ -523,9 +516,7 @@ class HvacVentOptimizerOptionsFlow(config_entries.OptionsFlowWithConfigEntry):
                         DEFAULT_SPREAD_IMPROVEMENT_DEADBAND_C,
                     ),
                     CONF_CROSSCOUPLING_ENABLED: bool(
-                        user_input.get(
-                            CONF_CROSSCOUPLING_ENABLED, DEFAULT_CROSSCOUPLING_ENABLED
-                        )
+                        user_input.get(CONF_CROSSCOUPLING_ENABLED, DEFAULT_CROSSCOUPLING_ENABLED)
                     ),
                     CONF_AIRFLOW_LIMITED_MARGIN_PCT: _clamp_int(
                         user_input.get(CONF_AIRFLOW_LIMITED_MARGIN_PCT),
@@ -563,15 +554,11 @@ class HvacVentOptimizerOptionsFlow(config_entries.OptionsFlowWithConfigEntry):
                     ): bool,
                     vol.Required(
                         CONF_CLOSE_INACTIVE_ROOMS,
-                        default=options.get(
-                            CONF_CLOSE_INACTIVE_ROOMS, DEFAULT_CLOSE_INACTIVE_ROOMS
-                        ),
+                        default=options.get(CONF_CLOSE_INACTIVE_ROOMS, DEFAULT_CLOSE_INACTIVE_ROOMS),
                     ): bool,
                     vol.Required(
                         CONF_VENT_GRANULARITY,
-                        default=str(
-                            options.get(CONF_VENT_GRANULARITY, DEFAULT_VENT_GRANULARITY)
-                        ),
+                        default=str(options.get(CONF_VENT_GRANULARITY, DEFAULT_VENT_GRANULARITY)),
                     ): selector.SelectSelector(
                         selector.SelectSelectorConfig(
                             options=["5", "10", "25", "50", "100"],
@@ -580,15 +567,11 @@ class HvacVentOptimizerOptionsFlow(config_entries.OptionsFlowWithConfigEntry):
                     ),
                     vol.Required(
                         CONF_POLL_INTERVAL_ACTIVE,
-                        default=options.get(
-                            CONF_POLL_INTERVAL_ACTIVE, DEFAULT_POLL_INTERVAL_ACTIVE
-                        ),
+                        default=options.get(CONF_POLL_INTERVAL_ACTIVE, DEFAULT_POLL_INTERVAL_ACTIVE),
                     ): vol.All(vol.Coerce(int), vol.Range(min=1)),
                     vol.Required(
                         CONF_POLL_INTERVAL_IDLE,
-                        default=options.get(
-                            CONF_POLL_INTERVAL_IDLE, DEFAULT_POLL_INTERVAL_IDLE
-                        ),
+                        default=options.get(CONF_POLL_INTERVAL_IDLE, DEFAULT_POLL_INTERVAL_IDLE),
                     ): vol.All(vol.Coerce(int), vol.Range(min=1)),
                     vol.Required(
                         CONF_INITIAL_EFFICIENCY_PERCENT,
@@ -613,9 +596,7 @@ class HvacVentOptimizerOptionsFlow(config_entries.OptionsFlowWithConfigEntry):
                     ): bool,
                     vol.Required(
                         CONF_CONTROL_STRATEGY,
-                        default=options.get(
-                            CONF_CONTROL_STRATEGY, DEFAULT_CONTROL_STRATEGY
-                        ),
+                        default=options.get(CONF_CONTROL_STRATEGY, DEFAULT_CONTROL_STRATEGY),
                     ): selector.SelectSelector(
                         selector.SelectSelectorConfig(
                             options=list(CONTROL_STRATEGIES),
@@ -687,20 +668,14 @@ class HvacVentOptimizerOptionsFlow(config_entries.OptionsFlowWithConfigEntry):
                     ): vol.All(vol.Coerce(int), vol.Range(min=5, max=720)),
                     vol.Required(
                         CONF_SAFETY_FLOOR_PCT,
-                        default=options.get(
-                            CONF_SAFETY_FLOOR_PCT, DEFAULT_SAFETY_FLOOR_PCT
-                        ),
+                        default=options.get(CONF_SAFETY_FLOOR_PCT, DEFAULT_SAFETY_FLOOR_PCT),
                     ): vol.All(
                         vol.Coerce(int),
-                        vol.Range(
-                            min=SAFETY_FLOOR_PCT_RANGE[0], max=SAFETY_FLOOR_PCT_RANGE[1]
-                        ),
+                        vol.Range(min=SAFETY_FLOOR_PCT_RANGE[0], max=SAFETY_FLOOR_PCT_RANGE[1]),
                     ),
                     vol.Required(
                         CONF_SPREAD_GUARDRAIL_C,
-                        default=options.get(
-                            CONF_SPREAD_GUARDRAIL_C, DEFAULT_SPREAD_GUARDRAIL_C
-                        ),
+                        default=options.get(CONF_SPREAD_GUARDRAIL_C, DEFAULT_SPREAD_GUARDRAIL_C),
                     ): vol.All(
                         vol.Coerce(float),
                         vol.Range(
@@ -723,9 +698,7 @@ class HvacVentOptimizerOptionsFlow(config_entries.OptionsFlowWithConfigEntry):
                     ),
                     vol.Required(
                         CONF_CROSSCOUPLING_ENABLED,
-                        default=options.get(
-                            CONF_CROSSCOUPLING_ENABLED, DEFAULT_CROSSCOUPLING_ENABLED
-                        ),
+                        default=options.get(CONF_CROSSCOUPLING_ENABLED, DEFAULT_CROSSCOUPLING_ENABLED),
                     ): bool,
                     vol.Required(
                         CONF_AIRFLOW_LIMITED_MARGIN_PCT,
@@ -755,9 +728,7 @@ class HvacVentOptimizerOptionsFlow(config_entries.OptionsFlowWithConfigEntry):
                     ),
                     vol.Required(
                         CONF_SHORT_CYCLE_GAP_MIN,
-                        default=options.get(
-                            CONF_SHORT_CYCLE_GAP_MIN, DEFAULT_SHORT_CYCLE_GAP_MIN
-                        ),
+                        default=options.get(CONF_SHORT_CYCLE_GAP_MIN, DEFAULT_SHORT_CYCLE_GAP_MIN),
                     ): vol.All(
                         vol.Coerce(int),
                         vol.Range(
@@ -849,9 +820,7 @@ class HvacVentOptimizerOptionsFlow(config_entries.OptionsFlowWithConfigEntry):
         self._temp_sensor_key_map = {}
         self._door_sensor_key_map = {}
 
-        thermostat_selector = selector.EntitySelector(
-            selector.EntitySelectorConfig(domain="climate")
-        )
+        thermostat_selector = selector.EntitySelector(selector.EntitySelectorConfig(domain="climate"))
         temp_sensor_selector = selector.EntitySelector(
             selector.EntitySelectorConfig(domain="sensor", device_class="temperature")
         )
@@ -912,7 +881,9 @@ class HvacVentOptimizerOptionsFlow(config_entries.OptionsFlowWithConfigEntry):
     async def async_step_conventional_vents(self, user_input: dict[str, Any] | None = None):
         errors: dict[str, str] = {}
         options = dict(self.config_entry.options)
-        assignments = options.get(CONF_VENT_ASSIGNMENTS, self.config_entry.data.get(CONF_VENT_ASSIGNMENTS, {}))
+        assignments = options.get(
+            CONF_VENT_ASSIGNMENTS, self.config_entry.data.get(CONF_VENT_ASSIGNMENTS, {})
+        )
 
         if not assignments:
             errors["base"] = "no_assignments"
@@ -976,7 +947,7 @@ def _clamp_int(value: Any, lo: int, hi: int, default: int) -> int:
     so a malformed option can never crash the flow or escape the safe band.
     """
     try:
-        ivalue = int(round(float(value)))
+        ivalue = round(float(value))
     except (TypeError, ValueError):
         return default
     return max(lo, min(hi, ivalue))

@@ -200,9 +200,7 @@ def test_run_ends_at_horizon_when_setpoint_unreachable():
 # Safety floor honored in the sim (R15.2)
 # ---------------------------------------------------------------------------
 def test_safety_floor_honored_every_step():
-    scenario = _cooling_scenario(
-        settings=balance.AllocSettings(safety_floor_pct=40.0, conventional_vents=0)
-    )
+    scenario = _cooling_scenario(settings=balance.AllocSettings(safety_floor_pct=40.0, conventional_vents=0))
     result = simulator.run(scenario, strategy="balance")
     floor = 40.0
     assert result.min_combined_open_pct >= floor - 1e-6
@@ -267,9 +265,7 @@ def test_outdoor_profile_changes_regime():
 # ---------------------------------------------------------------------------
 def test_inactive_room_excluded_from_termination_and_spread():
     rooms = [
-        simulator.RoomScenario(
-            room_id="active", temp_c=27.0, efficiency=0.2, leak=0.1, idle_drift=0.0
-        ),
+        simulator.RoomScenario(room_id="active", temp_c=27.0, efficiency=0.2, leak=0.1, idle_drift=0.0),
         # Inactive room sits far off-setpoint; it must NOT keep the run going
         # nor inflate the spread metric.
         simulator.RoomScenario(
@@ -383,3 +379,129 @@ def test_compare_rejects_empty_strategy_list():
 def test_compare_rejects_unknown_strategy():
     with pytest.raises(ValueError):
         simulator.compare(_cooling_scenario(), ["does_not_exist"], to_stdout=False)
+
+
+# ---------------------------------------------------------------------------
+# Per-room door-leakage learning (Task 13.1, R26.1/R26.3/R27.4)
+# ---------------------------------------------------------------------------
+# The simulator's ``doors_open`` scenario input feeds the *global* context door
+# multiplier, but the door-leakage *learning* (learning.update_door_factor /
+# resolve_door_factor) is per room/per mode. These tests drive the extended
+# scenario in which each room injects its own door-open leakage ratio and the
+# simulator folds enough door-open samples through the pure learner to converge
+# the cell — proving the per-room differentiation the flat 0.9 cannot express.
+def _door_scenario(**overrides):
+    """Two rooms with materially different injected door-open leakage + a
+    third room kept below the confidence gate, all sharing one cooling setpoint.
+
+    ``door_open_factor`` is the injected *true* ratio ``rate_open / rate_closed``
+    for the room (a leaky room degrades a lot → low ratio; a tight interior door
+    barely degrades → ratio near 1.0). ``door_open_samples`` is how many
+    door-open observations the simulator folds into that room's door-factor cell.
+    """
+    rooms = [
+        simulator.RoomScenario(
+            room_id="leaky",
+            temp_c=27.0,
+            efficiency=0.050,
+            leak=0.1,
+            idle_drift=0.0,
+            door_open_factor=0.5,
+            door_open_samples=DOOR_LEARN_SAMPLES,
+        ),
+        simulator.RoomScenario(
+            room_id="tight",
+            temp_c=27.0,
+            efficiency=0.050,
+            leak=0.1,
+            idle_drift=0.0,
+            door_open_factor=0.97,
+            door_open_samples=DOOR_LEARN_SAMPLES,
+        ),
+        simulator.RoomScenario(
+            room_id="cold_start",
+            temp_c=27.0,
+            efficiency=0.050,
+            leak=0.1,
+            idle_drift=0.0,
+            door_open_factor=0.5,
+            # Deliberately below the confidence gate so it must resolve to 0.9.
+            door_open_samples=learning.DOOR_MIN_N - 1,
+        ),
+    ]
+    kwargs = {
+        "rooms": rooms,
+        "setpoint_c": 26.0,
+        "mode": "cooling",
+        "doors_open": True,
+        "dt_min": 1.0,
+        "horizon_min": 600.0,
+        "seed": 7,
+    }
+    kwargs.update(overrides)
+    return simulator.Scenario(**kwargs)
+
+
+# A comfortable margin above ``DOOR_MIN_N`` so the EMA settles near the injected
+# ratio for the "sufficient samples" rooms.
+DOOR_LEARN_SAMPLES = 30
+
+
+def test_learn_door_factors_differentiates_leaky_from_tight():
+    resolved = simulator.learn_door_factors(_door_scenario())
+    # A leaky room converges toward the lower clamp...
+    assert resolved["leaky"] == pytest.approx(0.5, abs=0.05)
+    # ...a tight interior door stays near 1.0...
+    assert resolved["tight"] >= 0.95
+    # ...and the two are materially different (the whole point of learning it
+    # per room instead of one flat 0.9).
+    assert resolved["tight"] - resolved["leaky"] > 0.4
+
+
+def test_learn_door_factors_sub_gate_room_resolves_to_default():
+    resolved = simulator.learn_door_factors(_door_scenario())
+    # Fewer than DOOR_MIN_N door-open samples → not trusted → legacy 0.9 exactly.
+    assert resolved["cold_start"] == pytest.approx(learning.DOOR_FACTOR_DEFAULT)
+    assert resolved["cold_start"] == pytest.approx(0.9)
+
+
+def test_learn_door_factors_only_reports_rooms_with_injected_leakage():
+    # A room with no injected door-open leakage is not a door-learning subject
+    # and must not appear in the resolved map (R30.2 — no misleading factor).
+    scenario = _door_scenario(
+        rooms=[
+            simulator.RoomScenario(
+                "leaky", 27.0, 0.05, 0.1, door_open_factor=0.5, door_open_samples=DOOR_LEARN_SAMPLES
+            ),
+            simulator.RoomScenario("no_door", 27.0, 0.05, 0.1),
+        ]
+    )
+    resolved = simulator.learn_door_factors(scenario)
+    assert set(resolved) == {"leaky"}
+
+
+def test_learn_door_factors_resolved_values_are_bounded():
+    # Every resolved factor stays within [DOOR_FACTOR_MIN, 1.0] (Property 14),
+    # even when the injected leakage is below the clamp.
+    scenario = _door_scenario(
+        rooms=[
+            simulator.RoomScenario(
+                "over_leaky", 27.0, 0.05, 0.1, door_open_factor=0.2, door_open_samples=DOOR_LEARN_SAMPLES
+            ),
+            simulator.RoomScenario(
+                "tight", 27.0, 0.05, 0.1, door_open_factor=1.2, door_open_samples=DOOR_LEARN_SAMPLES
+            ),
+        ]
+    )
+    resolved = simulator.learn_door_factors(scenario)
+    for value in resolved.values():
+        assert learning.DOOR_FACTOR_MIN <= value <= learning.DOOR_FACTOR_MAX
+    # Below-clamp injection resolves to the lower clamp; above-clamp to 1.0.
+    assert resolved["over_leaky"] == pytest.approx(learning.DOOR_FACTOR_MIN)
+    assert resolved["tight"] == pytest.approx(learning.DOOR_FACTOR_MAX)
+
+
+def test_learn_door_factors_is_deterministic():
+    a = simulator.learn_door_factors(_door_scenario())
+    b = simulator.learn_door_factors(_door_scenario())
+    assert a == b

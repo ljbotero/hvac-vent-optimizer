@@ -5,6 +5,7 @@ Covers:
   #5  cycle samples are still recorded when an adjustment-batch cap is hit
   #8  pre-adjust / manual invocations don't inflate the active-poll counter
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -16,9 +17,7 @@ def test_fixture_sanity_issues_command(ready_coordinator):
     """The wired fixture should produce a concrete vent command."""
     rc = ready_coordinator
     coord = rc["coord"]
-    asyncio.run(
-        coord._async_apply_dab_adjustments(rc["thermostat"], "cooling", [rc["vent_id"]], rc["data"])
-    )
+    asyncio.run(coord._async_apply_dab_adjustments(rc["thermostat"], "cooling", [rc["vent_id"]], rc["data"]))
     assert rc["api"].set_vent_calls, "expected at least one vent command from the apply path"
 
 

@@ -83,6 +83,7 @@ Worked adaptive-EMA numeric example (cooling baseline AND regime 0 cell):
         baseline.n = 2 ; regimes[0].n = 2
 ====================================================================
 """
+
 from __future__ import annotations
 
 import importlib.util as _importlib_util
@@ -92,7 +93,12 @@ import sys as _sys
 
 import pytest
 
-_LEARNING_PATH = _pathlib.Path(__file__).resolve().parent.parent / "custom_components" / "hvac_vent_optimizer" / "learning.py"
+_LEARNING_PATH = (
+    _pathlib.Path(__file__).resolve().parent.parent
+    / "custom_components"
+    / "hvac_vent_optimizer"
+    / "learning.py"
+)
 
 
 def _load_learning():
@@ -119,7 +125,7 @@ def _expected_alpha(learn, n: int) -> float:
 # Module constants (concrete contract pinned by the tests)
 # ---------------------------------------------------------------------------
 def test_constants_have_expected_concrete_values(learn):
-    assert learn.EFF_REGIME_COUNT == 4          # matches context.py 4-regime mapping
+    assert learn.EFF_REGIME_COUNT == 4  # matches context.py 4-regime mapping
     assert learn.REGIME_MIN_N == 5
     assert learn.RATE_MIN == pytest.approx(0.0)
     assert learn.RATE_MAX == pytest.approx(2.0)
@@ -249,9 +255,7 @@ def test_effective_rate_uses_cell_rate_at_threshold(learn):
         learn.update_room_efficiency(m, 0.25, 0, mode="cooling")
     assert m.cooling.regimes[0].n == learn.REGIME_MIN_N
     # at/above threshold and rate > 0 -> returns the regime cell rate
-    assert learn.effective_rate(m, 0, mode="cooling") == pytest.approx(
-        m.cooling.regimes[0].rate
-    )
+    assert learn.effective_rate(m, 0, mode="cooling") == pytest.approx(m.cooling.regimes[0].rate)
 
 
 def test_effective_rate_zero_cell_rate_falls_back_even_when_n_high(learn):
@@ -279,7 +283,7 @@ def test_asymmetric_regimes_diverge(learn):
     r0 = learn.effective_rate(m, 0, mode="cooling")
     r1 = learn.effective_rate(m, 1, mode="cooling")
     assert r0 < r1
-    assert r1 - r0 > 0.1            # genuinely diverged, not noise
+    assert r1 - r0 > 0.1  # genuinely diverged, not noise
     # both remain within the clamp band
     assert learn.RATE_MIN <= r0 <= learn.RATE_MAX
     assert learn.RATE_MIN <= r1 <= learn.RATE_MAX
@@ -314,14 +318,14 @@ def test_effective_rate_clamps_cell_rate_to_rate_max(learn):
     m = learn.new_room_model()
     m.cooling.baseline = 0.30
     m.cooling.n = 10
-    m.cooling.regimes[0].rate = 5.0                 # absurdly high
+    m.cooling.regimes[0].rate = 5.0  # absurdly high
     m.cooling.regimes[0].n = learn.REGIME_MIN_N
     assert learn.effective_rate(m, 0, mode="cooling") == pytest.approx(learn.RATE_MAX)
 
 
 def test_effective_rate_clamps_negative_baseline_to_rate_min(learn):
     m = learn.new_room_model()
-    m.cooling.baseline = -3.0                       # degenerate negative
+    m.cooling.baseline = -3.0  # degenerate negative
     m.cooling.n = 10
     # regime cell below threshold -> fall back to baseline -> clamped to RATE_MIN
     assert learn.effective_rate(m, 0, mode="cooling") == pytest.approx(learn.RATE_MIN)

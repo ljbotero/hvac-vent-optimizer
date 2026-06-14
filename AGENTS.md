@@ -153,6 +153,17 @@ python -m custom_components.hvac_vent_optimizer.simulator --compare
 - **Fully async** for all I/O: `aiohttp` for HTTP, `asyncio` for concurrency. Never block.
 - **Pure modules import no Home Assistant.** Keep `dab.py`, `balance.py`, `learning.py`, `context.py`, `simulator.py` HA-free so they stay standalone-testable and simulator-usable.
 - **Strict TDD + quality gates.** Write the failing test/repro first. `ruff`, `black --check`, and `mypy` run in pre-commit and CI; do not increase a file's warning count.
+- **Lint/format/type gates MUST be clean before every commit (no exceptions).** Treat `ruff`, `black`, and `mypy` warnings as errors — never commit code that introduces or leaves them. Before staging a commit, run all gates from the package root and resolve everything they report:
+  ```bash
+  ruff check .          # must report: All checks passed!
+  black --check .        # must report: would reformat 0 files (run `black .` to fix)
+  mypy .                 # pure modules (balance/learning/context/simulator) MUST stay at 0; no file above its baseline
+  pytest                 # hard gate — must be green
+  ```
+  - Prefer real fixes over suppression. Apply `ruff check . --fix` (and review `--unsafe-fixes` before applying) and `black .`, then hand-fix what remains.
+  - Only suppress a warning with an inline `# noqa: <RULE>` (or a scoped `pyproject.toml` per-file-ignore) when it is genuinely intentional — e.g. the broad `except Exception  # noqa: BLE001` at service/update boundaries — and always include a short reason. Never blanket-disable a rule to silence a real problem.
+  - The new pure modules (`balance.py`, `learning.py`, `context.py`, `simulator.py`) stay **strict-clean (0)** under mypy at all times.
+  - If a gate cannot be run locally (missing tool/dep), say so explicitly in the change summary rather than committing unverified.
 
 ### Data flow
 - Coordinator stores fetched data as `{"vents": {id: {...}}, "pucks": {id: {...}}}`.

@@ -1,18 +1,19 @@
 """Sensor platform for Flair pucks and vents."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC
 
 from homeassistant.components.sensor import SensorEntity, SensorEntityDescription, SensorStateClass
-from datetime import timezone
-from homeassistant.util import dt as dt_util
 from homeassistant.const import (
     PERCENTAGE,
-    UnitOfTemperature,
     SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
     UnitOfPressure,
+    UnitOfTemperature,
 )
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
 
@@ -351,11 +352,11 @@ async def async_setup_entry(hass, entry, async_add_entities):
     vents = coordinator.data.get("vents", {}) if coordinator.data else {}
     entities: list[FlairPuckSensor] = []
 
-    for puck_id in pucks.keys():
+    for puck_id in pucks:
         for description in PUCK_SENSOR_DESCRIPTIONS:
             entities.append(FlairPuckSensor(coordinator, entry.entry_id, puck_id, description))
 
-    for vent_id in vents.keys():
+    for vent_id in vents:
         for description in VENT_SENSOR_DESCRIPTIONS:
             entities.append(FlairVentSensor(coordinator, entry.entry_id, vent_id, description))
         for description in VENT_METRIC_SENSOR_DESCRIPTIONS:
@@ -379,7 +380,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         if room_id and room_id not in rooms:
             rooms[room_id] = room
 
-    for room_id in rooms.keys():
+    for room_id in rooms:
         for description in ROOM_SENSOR_DESCRIPTIONS:
             entities.append(FlairRoomSensor(coordinator, entry.entry_id, room_id, description))
 
@@ -407,7 +408,9 @@ class FlairPuckSensor(CoordinatorEntity, SensorEntity):
 
     entity_description: FlairPuckSensorDescription
 
-    def __init__(self, coordinator, entry_id: str, puck_id: str, description: FlairPuckSensorDescription) -> None:
+    def __init__(
+        self, coordinator, entry_id: str, puck_id: str, description: FlairPuckSensorDescription
+    ) -> None:
         super().__init__(coordinator)
         self.entity_description = description
         self._entry_id = entry_id
@@ -447,7 +450,7 @@ class FlairPuckSensor(CoordinatorEntity, SensorEntity):
             voltage = attrs.get("system-voltage")
             if voltage is None:
                 return None
-            return max(0, min(100, int(round(((voltage - 2.0) / 1.6) * 100))))
+            return max(0, min(100, round(((voltage - 2.0) / 1.6) * 100)))
 
         return value
 
@@ -457,7 +460,9 @@ class FlairVentSensor(CoordinatorEntity, SensorEntity):
 
     entity_description: FlairVentSensorDescription
 
-    def __init__(self, coordinator, entry_id: str, vent_id: str, description: FlairVentSensorDescription) -> None:
+    def __init__(
+        self, coordinator, entry_id: str, vent_id: str, description: FlairVentSensorDescription
+    ) -> None:
         super().__init__(coordinator)
         self.entity_description = description
         self._entry_id = entry_id
@@ -501,7 +506,7 @@ class FlairVentSensor(CoordinatorEntity, SensorEntity):
             if value is None:
                 return None
             if value.tzinfo is None:
-                return value.replace(tzinfo=timezone.utc)
+                return value.replace(tzinfo=UTC)
             return dt_util.as_utc(value)
 
         vent = (self.coordinator.data or {}).get("vents", {}).get(self._vent_id, {})
@@ -572,7 +577,9 @@ class FlairRoomSensor(CoordinatorEntity, SensorEntity):
 
     entity_description: FlairRoomSensorDescription
 
-    def __init__(self, coordinator, entry_id: str, room_id: str, description: FlairRoomSensorDescription) -> None:
+    def __init__(
+        self, coordinator, entry_id: str, room_id: str, description: FlairRoomSensorDescription
+    ) -> None:
         super().__init__(coordinator)
         self.entity_description = description
         self._entry_id = entry_id
@@ -618,13 +625,15 @@ class FlairRoomSensor(CoordinatorEntity, SensorEntity):
         attrs: dict[str, object] = {
             "signed_error_c": self.coordinator.get_room_signed_error(self._room_id),
             "airflow_limited": self.coordinator.is_room_airflow_limited(self._room_id),
-            "cooling_efficiency": self.coordinator.get_room_efficiency_percent(
-                self._room_id, "cooling"
-            ),
-            "heating_efficiency": self.coordinator.get_room_efficiency_percent(
-                self._room_id, "heating"
-            ),
+            "cooling_efficiency": self.coordinator.get_room_efficiency_percent(self._room_id, "cooling"),
+            "heating_efficiency": self.coordinator.get_room_efficiency_percent(self._room_id, "heating"),
         }
+        # Learned door-leakage multiplier (R30): surfaced ONLY for a room with a
+        # door sensor configured, so a sensorless room shows no misleading factor.
+        door_factor = self.coordinator.get_room_door_factor(self._room_id)
+        if door_factor is not None:
+            attrs["door_factor"] = door_factor
+            attrs["door_factor_trusted"] = self.coordinator.get_room_door_factor_trusted(self._room_id)
         return attrs
 
 
@@ -732,7 +741,9 @@ class DabHoldStatusSensor(CoordinatorEntity, SensorEntity):
 class ManualSuggestedApertureSensor(CoordinatorEntity, SensorEntity):
     """Suggested aperture sensor for manual vents."""
 
-    def __init__(self, coordinator, entry_id: str, vent_id: str, description: SensorEntityDescription) -> None:
+    def __init__(
+        self, coordinator, entry_id: str, vent_id: str, description: SensorEntityDescription
+    ) -> None:
         super().__init__(coordinator)
         self.entity_description = description
         self._entry_id = entry_id

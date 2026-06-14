@@ -25,6 +25,32 @@ These encode the learning-math correctness properties from design.md
   aperture; ``inverse`` is monotonic non-decreasing in required flow; and
   ``knee`` is the smallest breakpoint reaching ``(1 - KNEE_EPS)`` of full
   airflow. (Validates Requirements 25.12, 25.13.)
+* **Property 14 — Door factor bounded & non-amplifying.** For all models and
+  modes ``resolve_door_factor`` returns a value in ``[DOOR_FACTOR_MIN, 1.0]``;
+  no stream of ratios fed through ``update_door_factor`` can yield a resolved
+  factor ``> 1.0`` (an open door never speeds conditioning). (Validates
+  Requirements 26.1, 28.1, 28.2.)
+* **Property 15 — Cold-start equivalence.** With fewer than ``DOOR_MIN_N``
+  door-open samples for a mode AND no trusted other-mode cell (or no model at
+  all), ``resolve_door_factor`` returns exactly ``DOOR_FACTOR_DEFAULT`` (0.9),
+  identical to the pre-feature constant. (Validates Requirements 27.4, 26.1.)
+* **Property 16 — Per-mode independence & fallback ordering.** A trusted cell
+  for one mode never changes the other mode's resolution except via the
+  documented cross-mode fallback; once both are trusted each resolves to its own
+  factor; a cold/noisy cell never drags a trusted one. (Validates Requirements
+  27.1, 27.2, 27.3.)
+* **Property 17 — Door-factor learning stability & robustness.** Under arbitrary
+  streams of valid ratios the EMA stays clamped to ``[DOOR_FACTOR_MIN, 1.0]`` and
+  never diverges or goes negative; ``None`` / NaN / non-finite ratios and a
+  non-positive reference leave the cell unchanged; the first valid sample seeds
+  the cell. (Validates Requirements 28.2, 28.3, 28.4, 28.5.)
+* **Property 18 — Reference cleanliness & migration safety.** The pure door
+  functions never touch a ``RoomEfficiencyModel`` (door-open samples cannot
+  mutate the room model), door-closed/``None`` samples update it as before, a
+  store with no ``door_factor`` section loads to neutral (0.9) resolution,
+  ``door_factor_from_dict(door_factor_to_dict(m)) == m`` round-trips losslessly,
+  and malformed input never raises or loses data. (Validates Requirements 29.1,
+  29.2, 29.3, 29.4, 29.5.)
 
 ``learning.py`` is pure (HA-free, stdlib only), so it is loaded standalone by
 absolute path under the name ``hvo_learning`` — the same convention as
@@ -34,8 +60,10 @@ Home Assistant).
 
 The file name contains "properties" so ``pytest -k property`` collects it.
 
-_Requirements: 20.2, 25.10, 11.1, 25.2, 25.3, 25.6, 25.12, 25.13_
+_Requirements: 20.2, 25.10, 11.1, 25.2, 25.3, 25.6, 25.12, 25.13, 26.1, 27.1,
+27.2, 27.3, 27.4, 28.1, 28.2, 28.3, 28.4, 28.5, 29.1, 29.2, 29.3, 29.4, 29.5_
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -49,7 +77,12 @@ import pytest
 from hypothesis import assume, given, strategies as st
 
 # --- Load learning.py standalone (pure module, no HA) ----------------------
-_LEARNING_PATH = pathlib.Path(__file__).resolve().parent.parent / "custom_components" / "hvac_vent_optimizer" / "learning.py"
+_LEARNING_PATH = (
+    pathlib.Path(__file__).resolve().parent.parent
+    / "custom_components"
+    / "hvac_vent_optimizer"
+    / "learning.py"
+)
 _spec = importlib.util.spec_from_file_location("hvo_learning", _LEARNING_PATH)
 learning = importlib.util.module_from_spec(_spec)
 # Register before exec so dataclasses introspection (with `from __future__
@@ -292,9 +325,7 @@ def test_property11_untrusted_regime_falls_back_to_baseline(
     cell = sub.regimes[idx]
     if cell.n < learning.REGIME_MIN_N:
         result = learning.effective_rate(model, idx, mode=mode)
-        assert result == pytest.approx(
-            _clamp(sub.baseline or 0.0, learning.RATE_MIN, learning.RATE_MAX)
-        )
+        assert result == pytest.approx(_clamp(sub.baseline or 0.0, learning.RATE_MIN, learning.RATE_MAX))
 
 
 @given(
@@ -566,3 +597,503 @@ def test_property13_knee_is_smallest_breakpoint_reaching_threshold(curve: Any) -
     assert curve.knee() == expected
     # The knee's own airflow must actually clear the threshold.
     assert curve.flow(curve.knee()) >= target - 1e-9
+
+
+# ===========================================================================
+# Shared strategies / helpers for the door-leakage learner (Properties 14-18)
+# ===========================================================================
+# A door-factor cell is fed a *residual ratio* (= observed full-open rate /
+# door-closed reference rate). The learner must be robust to the same garbage the
+# room learner sees (None / NaN / +/-inf) and clamp every valid ratio into the
+# [DOOR_FACTOR_MIN, DOOR_FACTOR_MAX] band BEFORE the EMA, so the resolved factor
+# can never exceed 1.0.
+
+# Ratios the learner might see, including the values it must ignore.
+door_noisy_ratio = st.one_of(
+    st.none(),
+    st.just(math.nan),
+    st.just(math.inf),
+    st.just(-math.inf),
+    st.floats(allow_nan=False, allow_infinity=False, min_value=-5.0, max_value=5.0),
+)
+
+# Strictly finite ratios, deliberately spanning outside the [0.5, 1.0] band so
+# the pre-EMA clamp (R28.2) is exercised.
+door_finite_ratio = st.floats(allow_nan=False, allow_infinity=False, min_value=-5.0, max_value=5.0)
+
+# An in-band ratio: when fed as a *constant* stream the cell converges exactly to
+# it, so resolution can be asserted against the input value.
+door_inband_ratio = st.floats(
+    allow_nan=False,
+    allow_infinity=False,
+    min_value=learning.DOOR_FACTOR_MIN,
+    max_value=learning.DOOR_FACTOR_MAX,
+)
+
+door_modes = st.sampled_from(["cooling", "heating"])
+
+# Arbitrary defaults (incl. out-of-band) to prove resolution always clamps.
+door_default = st.floats(allow_nan=False, allow_infinity=False, min_value=-2.0, max_value=3.0)
+
+
+def _other_mode(mode: str) -> str:
+    return "heating" if mode == "cooling" else "cooling"
+
+
+def _ratio_is_valid(ratio: float | None) -> bool:
+    """Mirror ``update_door_factor``'s accept test: finite, non-None ratio."""
+    return ratio is not None and math.isfinite(ratio)
+
+
+def _form_ratio(sample: float | None, ref: float) -> float | None:
+    """Form the residual the coordinator feeds the learner (A7 Learn / R28.4).
+
+    Mirrors the coordinator write seam: a ``None``/non-finite ``sample`` or a
+    non-positive ``ref`` yields *no* ratio (``None`` → the learner skips), else
+    the residual ``sample / ref``.
+    """
+    if sample is None or not math.isfinite(sample):
+        return None
+    if ref <= 0.0:
+        return None
+    return sample / ref
+
+
+@st.composite
+def door_cells(draw: st.DrawFn) -> Any:
+    """An arbitrary :class:`DoorFactorCell` (finite-or-None factor, n >= 0)."""
+    has_factor = draw(st.booleans())
+    factor = (
+        draw(st.floats(allow_nan=False, allow_infinity=False, min_value=-2.0, max_value=2.0))
+        if has_factor
+        else None
+    )
+    n = draw(st.integers(min_value=0, max_value=50))
+    return learning.DoorFactorCell(factor=factor, n=n)
+
+
+@st.composite
+def door_models(draw: st.DrawFn) -> Any:
+    """An arbitrary :class:`DoorFactorModel` with two independent cells."""
+    return learning.DoorFactorModel(cooling=draw(door_cells()), heating=draw(door_cells()))
+
+
+def _learned_model(ratios: list[float | None], mode: str) -> Any:
+    """Fold ``ratios`` into a fresh model's ``mode`` cell and return it."""
+    model = learning.new_door_factor_model()
+    for ratio in ratios:
+        learning.update_door_factor(model, ratio, mode=mode)
+    return model
+
+
+# ===========================================================================
+# Property 14 — Door factor bounded & non-amplifying
+# Invariant: resolve_door_factor always returns a value in [DOOR_FACTOR_MIN, 1.0];
+# no ratio stream (and no out-of-band stored/default value) can push it above 1.0.
+# **Validates: Requirements 26.1, 28.1, 28.2**
+# ===========================================================================
+@given(model=door_models(), mode=door_modes, default=door_default)
+def test_property14_resolution_always_in_band(model: Any, mode: str, default: float) -> None:
+    """For ANY model, mode, and (even out-of-band) default the result is clamped."""
+    result = learning.resolve_door_factor(model, mode, default=default)
+    assert learning.DOOR_FACTOR_MIN <= result <= learning.DOOR_FACTOR_MAX
+    assert math.isfinite(result)
+
+
+@given(mode=door_modes, default=door_default)
+def test_property14_none_model_in_band(mode: str, default: float) -> None:
+    """A ``None`` model (cold install) still resolves inside the band."""
+    result = learning.resolve_door_factor(None, mode, default=default)
+    assert learning.DOOR_FACTOR_MIN <= result <= learning.DOOR_FACTOR_MAX
+
+
+@given(ratios=st.lists(door_noisy_ratio, max_size=60), mode=door_modes)
+def test_property14_no_ratio_stream_exceeds_one(ratios: list[float | None], mode: str) -> None:
+    """No input ratio stream can produce a resolved factor above 1.0 (R28.1)."""
+    model = _learned_model(ratios, mode)
+    # The learned cell's stored factor, if any, is itself in-band (clamped pre-EMA)...
+    cell = getattr(model, mode)
+    if cell.factor is not None:
+        assert learning.DOOR_FACTOR_MIN <= cell.factor <= learning.DOOR_FACTOR_MAX
+    # ...and resolution for either mode never amplifies.
+    for probe in ("cooling", "heating"):
+        assert learning.resolve_door_factor(model, probe) <= learning.DOOR_FACTOR_MAX
+
+
+@given(stored=st.floats(allow_nan=False, allow_infinity=False, min_value=1.0001, max_value=10.0))
+def test_property14_out_of_band_stored_factor_clamped_to_one(stored: float) -> None:
+    """A persisted factor above 1.0 (e.g. 1.4) resolves down to exactly 1.0."""
+    model = learning.DoorFactorModel(
+        cooling=learning.DoorFactorCell(factor=stored, n=learning.DOOR_MIN_N),
+        heating=learning.DoorFactorCell(),
+    )
+    assert learning.resolve_door_factor(model, "cooling") == pytest.approx(learning.DOOR_FACTOR_MAX)
+
+
+# ===========================================================================
+# Property 15 — Cold-start equivalence (graceful fallback)
+# Invariant: with no trusted cell for the requested mode AND none for the other
+# mode (or no model), resolve returns EXACTLY DOOR_FACTOR_DEFAULT (0.9).
+# **Validates: Requirements 27.4, 26.1**
+# ===========================================================================
+@given(mode=door_modes)
+def test_property15_none_model_returns_default_exactly(mode: str) -> None:
+    """A cold install (no model) resolves to exactly the legacy 0.9."""
+    assert learning.resolve_door_factor(None, mode) == learning.DOOR_FACTOR_DEFAULT
+
+
+@given(
+    ratios=st.lists(door_finite_ratio, max_size=learning.DOOR_MIN_N - 1),
+    mode=door_modes,
+)
+def test_property15_below_gate_returns_default_exactly(ratios: list[float], mode: str) -> None:
+    """Fewer than DOOR_MIN_N samples on EITHER mode → exactly 0.9 for both modes."""
+    model = learning.new_door_factor_model()
+    # Feed the same sub-gate stream to BOTH modes so neither becomes trusted.
+    for ratio in ratios:
+        learning.update_door_factor(model, ratio, mode="cooling")
+        learning.update_door_factor(model, ratio, mode="heating")
+    assert model.cooling.n < learning.DOOR_MIN_N
+    assert model.heating.n < learning.DOOR_MIN_N
+    assert learning.resolve_door_factor(model, mode) == learning.DOOR_FACTOR_DEFAULT
+
+
+@given(
+    cooling_n=st.integers(min_value=0, max_value=learning.DOOR_MIN_N - 1),
+    heating_n=st.integers(min_value=0, max_value=learning.DOOR_MIN_N - 1),
+    cooling_factor=st.one_of(st.none(), door_inband_ratio),
+    heating_factor=st.one_of(st.none(), door_inband_ratio),
+    mode=door_modes,
+)
+def test_property15_untrusted_cells_resolve_to_default(
+    cooling_n: int,
+    heating_n: int,
+    cooling_factor: float | None,
+    heating_factor: float | None,
+    mode: str,
+) -> None:
+    """Even with a learned factor present, a sub-gate count is not trusted (→ 0.9)."""
+    model = learning.DoorFactorModel(
+        cooling=learning.DoorFactorCell(factor=cooling_factor, n=cooling_n),
+        heating=learning.DoorFactorCell(factor=heating_factor, n=heating_n),
+    )
+    assert learning.resolve_door_factor(model, mode) == learning.DOOR_FACTOR_DEFAULT
+
+
+@given(n=st.integers(min_value=learning.DOOR_MIN_N, max_value=50), mode=door_modes)
+def test_property15_high_count_but_no_factor_is_not_trusted(n: int, mode: str) -> None:
+    """A cell with n >= DOOR_MIN_N but ``factor is None`` is NOT trusted (→ 0.9)."""
+    model = learning.DoorFactorModel(
+        cooling=learning.DoorFactorCell(factor=None, n=n),
+        heating=learning.DoorFactorCell(factor=None, n=n),
+    )
+    assert learning.resolve_door_factor(model, mode) == learning.DOOR_FACTOR_DEFAULT
+
+
+# ===========================================================================
+# Property 16 — Per-mode independence & fallback ordering
+# Invariant: a trusted cell for one mode does not change the other mode's
+# resolution except via the documented cross-mode fallback; once both are trusted
+# each resolves to its own factor; a cold/noisy cell never drags a trusted one.
+# **Validates: Requirements 27.1, 27.2, 27.3**
+# ===========================================================================
+@given(cooling_ratio=door_inband_ratio, heating_ratio=door_inband_ratio)
+def test_property16_both_trusted_resolve_independently(
+    cooling_ratio: float,
+    heating_ratio: float,
+) -> None:
+    """Once both modes are trusted, each resolves to its OWN learned factor."""
+    model = learning.new_door_factor_model()
+    # Constant in-band streams converge each cell exactly to its own ratio.
+    for _ in range(learning.DOOR_MIN_N):
+        learning.update_door_factor(model, cooling_ratio, mode="cooling")
+        learning.update_door_factor(model, heating_ratio, mode="heating")
+
+    assert learning.resolve_door_factor(model, "cooling") == pytest.approx(cooling_ratio)
+    assert learning.resolve_door_factor(model, "heating") == pytest.approx(heating_ratio)
+
+
+@given(trusted_ratio=door_inband_ratio, trusted_mode=door_modes)
+def test_property16_cross_mode_fallback_when_requested_cold(
+    trusted_ratio: float,
+    trusted_mode: str,
+) -> None:
+    """A cold mode borrows the other mode's trusted factor (D12 step 2)."""
+    cold_mode = _other_mode(trusted_mode)
+    model = learning.new_door_factor_model()
+    for _ in range(learning.DOOR_MIN_N):
+        learning.update_door_factor(model, trusted_ratio, mode=trusted_mode)
+
+    # The trusted mode resolves to its own factor...
+    assert learning.resolve_door_factor(model, trusted_mode) == pytest.approx(trusted_ratio)
+    # ...and the cold mode falls back to it (not the 0.9 default).
+    assert learning.resolve_door_factor(model, cold_mode) == pytest.approx(trusted_ratio)
+
+
+@given(
+    trusted_ratio=door_inband_ratio,
+    trusted_mode=door_modes,
+    noise=st.lists(door_noisy_ratio, max_size=40),
+)
+def test_property16_trusted_cell_not_dragged_by_other_mode_noise(
+    trusted_ratio: float,
+    trusted_mode: str,
+    noise: list[float | None],
+) -> None:
+    """Arbitrary samples on the OTHER mode never change a trusted resolution."""
+    other = _other_mode(trusted_mode)
+    model = learning.new_door_factor_model()
+    for _ in range(learning.DOOR_MIN_N):
+        learning.update_door_factor(model, trusted_ratio, mode=trusted_mode)
+
+    before = learning.resolve_door_factor(model, trusted_mode)
+    trusted_cell_before = getattr(model, trusted_mode)
+    snapshot = (trusted_cell_before.factor, trusted_cell_before.n)
+
+    for ratio in noise:
+        learning.update_door_factor(model, ratio, mode=other)
+
+    after = learning.resolve_door_factor(model, trusted_mode)
+    trusted_cell_after = getattr(model, trusted_mode)
+    assert after == before == pytest.approx(trusted_ratio)
+    assert (trusted_cell_after.factor, trusted_cell_after.n) == snapshot
+
+
+@given(ratios=st.lists(door_noisy_ratio, max_size=60), mode=door_modes)
+def test_property16_update_leaves_other_mode_cell_untouched(
+    ratios: list[float | None],
+    mode: str,
+) -> None:
+    """Updating one mode never mutates the other mode's cell (R27.1)."""
+    other = _other_mode(mode)
+    model = _learned_model(ratios, mode)
+    other_cell = getattr(model, other)
+    assert other_cell.factor is None
+    assert other_cell.n == 0
+
+
+# ===========================================================================
+# Property 17 — Door-factor learning stability & robustness
+# Invariant: the EMA stays clamped to [DOOR_FACTOR_MIN, 1.0] and never diverges
+# or goes negative under arbitrary valid streams; None/NaN/non-finite ratios and
+# a non-positive reference leave the cell unchanged; the first valid sample seeds.
+# **Validates: Requirements 28.2, 28.3, 28.4, 28.5**
+# ===========================================================================
+@given(ratios=st.lists(door_noisy_ratio, max_size=80), mode=door_modes)
+def test_property17_ema_clamped_and_finite_under_noise(
+    ratios: list[float | None],
+    mode: str,
+) -> None:
+    """No ratio stream pushes the factor out of band, NaN, inf, or negative."""
+    model = learning.new_door_factor_model()
+    valid = 0
+    for ratio in ratios:
+        learning.update_door_factor(model, ratio, mode=mode)
+        if _ratio_is_valid(ratio):
+            valid += 1
+        cell = getattr(model, mode)
+        # n advances exactly once per accepted (finite) ratio.
+        assert cell.n == valid
+        if cell.factor is not None:
+            assert math.isfinite(cell.factor)
+            assert learning.DOOR_FACTOR_MIN <= cell.factor <= learning.DOOR_FACTOR_MAX
+        else:
+            assert cell.n == 0
+
+
+@given(ratio=door_noisy_ratio, mode=door_modes)
+def test_property17_nonfinite_or_none_ratio_is_ignored(ratio: float | None, mode: str) -> None:
+    """A ``None`` / NaN / inf ratio leaves the whole model untouched (R28.3)."""
+    model = learning.new_door_factor_model()
+    learning.update_door_factor(model, ratio, mode=mode)
+    if not _ratio_is_valid(ratio):
+        for sub in ("cooling", "heating"):
+            cell = getattr(model, sub)
+            assert cell.factor is None
+            assert cell.n == 0
+
+
+@given(
+    sample=st.floats(allow_nan=False, allow_infinity=False, min_value=-1e3, max_value=1e3),
+    ref=st.floats(allow_nan=False, allow_infinity=False, min_value=-1.0, max_value=0.0),
+    mode=door_modes,
+)
+def test_property17_nonpositive_reference_skips_update(
+    sample: float,
+    ref: float,
+    mode: str,
+) -> None:
+    """A non-positive door-closed reference forms no ratio → no update (R28.4)."""
+    ratio = _form_ratio(sample, ref)
+    assert ratio is None  # the seam never divides by a non-positive denominator
+    model = learning.new_door_factor_model()
+    learning.update_door_factor(model, ratio, mode=mode)
+    cell = getattr(model, mode)
+    assert cell.factor is None and cell.n == 0
+
+
+@given(
+    stream=st.lists(
+        st.tuples(
+            door_noisy_ratio,  # sample
+            st.floats(allow_nan=False, allow_infinity=False, min_value=-1.0, max_value=3.0),  # ref
+        ),
+        max_size=60,
+    ),
+    mode=door_modes,
+)
+def test_property17_reference_seam_only_learns_valid_residuals(
+    stream: list[tuple[float | None, float]],
+    mode: str,
+) -> None:
+    """Threading (sample, ref) through the A7 seam stays bounded and counts right."""
+    model = learning.new_door_factor_model()
+    expected = 0
+    for sample, ref in stream:
+        ratio = _form_ratio(sample, ref)
+        learning.update_door_factor(model, ratio, mode=mode)
+        if _ratio_is_valid(ratio):
+            expected += 1
+    cell = getattr(model, mode)
+    assert cell.n == expected
+    if cell.factor is not None:
+        assert learning.DOOR_FACTOR_MIN <= cell.factor <= learning.DOOR_FACTOR_MAX
+
+
+@given(ratio=door_finite_ratio, mode=door_modes)
+def test_property17_first_valid_sample_seeds_the_cell(ratio: float, mode: str) -> None:
+    """The first valid ratio seeds the cell to ``clamp(ratio)`` with ``n == 1``."""
+    model = learning.new_door_factor_model()
+    learning.update_door_factor(model, ratio, mode=mode)
+    cell = getattr(model, mode)
+    assert cell.n == 1
+    assert cell.factor == pytest.approx(_clamp(ratio, learning.DOOR_FACTOR_MIN, learning.DOOR_FACTOR_MAX))
+
+
+@given(ratio=door_inband_ratio, extra=st.integers(min_value=0, max_value=40), mode=door_modes)
+def test_property17_repeated_identical_ratio_converges(
+    ratio: float,
+    extra: int,
+    mode: str,
+) -> None:
+    """A constant valid-ratio stream converges the EMA to that ratio (R28.5)."""
+    model = learning.new_door_factor_model()
+    for _ in range(1 + extra):
+        learning.update_door_factor(model, ratio, mode=mode)
+    cell = getattr(model, mode)
+    assert cell.factor == pytest.approx(ratio)
+
+
+# ===========================================================================
+# Property 18 — Reference cleanliness & migration safety (pure layer)
+# Invariant: the pure door functions never touch a RoomEfficiencyModel;
+# door-closed/None samples update it as before; a missing door_factor section
+# loads to neutral (0.9); to_dict/from_dict round-trips losslessly; malformed
+# input never raises or loses data.
+# **Validates: Requirements 29.1, 29.2, 29.3, 29.4, 29.5**
+# ===========================================================================
+@given(model=door_models())
+def test_property18_round_trip_is_lossless(model: Any) -> None:
+    """``door_factor_from_dict(door_factor_to_dict(m)) == m`` for any model."""
+    restored = learning.door_factor_from_dict(learning.door_factor_to_dict(model))
+    assert restored == model
+
+
+@given(ratios=st.lists(door_noisy_ratio, max_size=40), mode=door_modes)
+def test_property18_round_trip_after_learning(ratios: list[float | None], mode: str) -> None:
+    """A learned model also round-trips losslessly through the wire shape."""
+    model = _learned_model(ratios, mode)
+    restored = learning.door_factor_from_dict(learning.door_factor_to_dict(model))
+    assert restored == model
+
+
+@given(
+    garbage=st.one_of(
+        st.none(),
+        st.integers(),
+        st.text(),
+        st.floats(allow_nan=True, allow_infinity=True),
+        st.lists(st.integers(), max_size=5),
+        st.dictionaries(st.text(max_size=4), st.integers(), max_size=4),
+    ),
+    mode=door_modes,
+)
+def test_property18_malformed_input_never_raises_and_resolves_neutral(
+    garbage: Any,
+    mode: str,
+) -> None:
+    """Any malformed section decodes to a usable model (never raises, → 0.9)."""
+    model = learning.door_factor_from_dict(garbage)
+    assert isinstance(model, learning.DoorFactorModel)
+    # A garbled/empty section yields fresh cells, so resolution is the neutral default.
+    result = learning.resolve_door_factor(model, mode)
+    assert learning.DOOR_FACTOR_MIN <= result <= learning.DOOR_FACTOR_MAX
+
+
+@given(mode=door_modes)
+def test_property18_missing_section_loads_to_neutral(mode: str) -> None:
+    """A pre-feature store (no ``door_factor`` section) resolves to exactly 0.9."""
+    for missing in (None, {}, {"cooling": None, "heating": None}):
+        model = learning.door_factor_from_dict(missing)
+        assert learning.resolve_door_factor(model, mode) == learning.DOOR_FACTOR_DEFAULT
+
+
+@given(
+    garbled_cell=st.dictionaries(st.text(max_size=4), st.integers(), max_size=4),
+    mode=door_modes,
+)
+def test_property18_partial_section_decodes_tolerantly(
+    garbled_cell: dict,
+    mode: str,
+) -> None:
+    """A garbled per-mode cell decodes to a valid in-band cell without raising (R29.3)."""
+    model = learning.door_factor_from_dict({mode: garbled_cell, _other_mode(mode): garbled_cell})
+    cell = getattr(model, mode)
+    # Never raises; counts stay non-negative and any recovered factor is finite.
+    assert cell.n >= 0
+    assert cell.factor is None or math.isfinite(cell.factor)
+    # Resolution remains inside the band regardless of what was decoded.
+    assert learning.DOOR_FACTOR_MIN <= learning.resolve_door_factor(model, mode) <= learning.DOOR_FACTOR_MAX
+
+
+@given(ratios=st.lists(door_noisy_ratio, max_size=40), mode=door_modes)
+def test_property18_door_functions_never_touch_room_model(
+    ratios: list[float | None],
+    mode: str,
+) -> None:
+    """Door learning/resolution cannot mutate a ``RoomEfficiencyModel`` (D11/R29.1).
+
+    The pure door layer operates only on a ``DoorFactorModel``; a separately held
+    room model must be byte-for-byte unchanged after arbitrary door operations,
+    proving door-open samples cannot leak into the door-closed reference.
+    """
+    room = learning.new_room_model()
+    # Seed the room model with a few door-closed samples so there is state to disturb.
+    for i in range(6):
+        learning.update_room_efficiency(room, 0.05 + 0.001 * i, i % learning.EFF_REGIME_COUNT, mode=mode)
+    before = learning.room_model_to_dict(room)
+
+    door = learning.new_door_factor_model()
+    for ratio in ratios:
+        learning.update_door_factor(door, ratio, mode=mode)
+        learning.resolve_door_factor(door, mode)
+
+    assert learning.room_model_to_dict(room) == before
+
+
+@given(
+    sample=st.floats(allow_nan=False, allow_infinity=False, min_value=0.001, max_value=1.0),
+    regime_idx=st.integers(min_value=0, max_value=learning.EFF_REGIME_COUNT - 1),
+    mode=door_modes,
+)
+def test_property18_door_closed_sample_updates_room_model_as_before(
+    sample: float,
+    regime_idx: int,
+    mode: str,
+) -> None:
+    """A door-closed sample still advances the room model exactly as before (R29.2)."""
+    room = learning.new_room_model()
+    learning.update_room_efficiency(room, sample, regime_idx, mode=mode)
+    sub = getattr(room, mode)
+    assert sub.n == 1
+    assert sub.baseline == pytest.approx(sample)

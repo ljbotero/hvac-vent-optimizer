@@ -309,3 +309,78 @@ def test_notification_id_is_stable_slug(make_coordinator, capture_notifications)
 
     expected = f"{DOMAIN}_{entry.entry_id}_error_flair_update_failed"
     assert capture_notifications[0]["notification_id"] == expected
+
+
+# ---------------------------------------------------------------------------
+# D11 / R29.1 — door-closed-clean reference (no double-count).
+#
+# Tests-first (red) for Task 7.2. The latent bug: today every observed full-open
+# sample is folded into the ``RoomEfficiencyModel`` by
+# ``_update_room_efficiency_model`` regardless of door state. A door-open sample
+# therefore (a) lowers the door-closed reference rate AND (b) is discounted again
+# by the door multiplier at read time — counting the door effect twice. The fix
+# routes a door-open sample to the per-room ``DoorFactorModel`` ONLY, leaving the
+# room-efficiency reference exactly as it was.
+# ---------------------------------------------------------------------------
+def test_door_open_sample_does_not_mutate_room_efficiency_reference(make_coordinator):
+    """A door-open sample feeds only the door learner; the room model is untouched."""
+    from hvac_vent_optimizer import const, learning
+    from tests._fakes import FakeState as _FakeState
+
+    vent_id = "v1"
+    data = {
+        "vents": {
+            vent_id: {
+                "id": vent_id,
+                "name": "V1",
+                "attributes": {"percent-open": 0},
+                "room": {
+                    "id": "room1",
+                    "attributes": {
+                        "name": "Room1",
+                        "active": True,
+                        "current-temperature-c": 26.0,
+                    },
+                },
+            }
+        },
+        "pucks": {},
+    }
+    options = {
+        const.CONF_VENT_ASSIGNMENTS: {
+            vent_id: {
+                const.CONF_THERMOSTAT_ENTITY: "climate.t",
+                const.CONF_TEMP_SENSOR_ENTITY: None,
+                const.CONF_DOOR_SENSOR_ENTITY: "binary_sensor.door",
+            }
+        },
+        const.CONF_CONTROL_STRATEGY: "balance",
+    }
+    coord, hass, _api, _entry = make_coordinator(options=options, data=data)
+    hass.states.set("binary_sensor.door", _FakeState("on", {}))
+
+    # The door-closed reference is a clean, learned baseline (untrusted regimes,
+    # so ``effective_rate`` resolves to the baseline for any regime).
+    model = learning.new_room_model()
+    model.cooling.baseline = 0.08
+    model.cooling.n = 50
+    coord._room_efficiency_models["Room1"] = model
+
+    ctx = coord._build_context(vent_id, data)
+    assert ctx.doors_open is True
+    ref = learning.effective_rate(model, 0, "cooling")
+    assert ref == 0.08
+
+    sample = 0.06  # ratio = 0.75, inside the [0.5, 1.0] clamp
+    coord._update_room_efficiency_model(vent_id, "cooling", sample)
+
+    # D11: the room-efficiency reference is left exactly as seeded.
+    assert model.cooling.baseline == 0.08
+    assert model.cooling.n == 50
+    assert all(c.n == 0 for c in model.cooling.regimes)
+
+    # R26.3: the residual ratio went to the door learner instead.
+    door_model = coord._door_factor_models.get("Room1")
+    assert door_model is not None
+    assert door_model.cooling.n == 1
+    assert door_model.cooling.factor == pytest.approx(sample / ref)

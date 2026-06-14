@@ -5,7 +5,7 @@ installed by ``conftest.py``. Task 24 adds, computed every poll while the HVAC
 is active:
 
 * ``get_active_room_spread()`` — the current active-room temperature spread
-  (max − min) in °C (R13.1/R13.2). Inactive rooms are excluded (R2.5).
+  (max - min) in °C (R13.1/R13.2). Inactive rooms are excluded (R2.5).
 * ``get_max_active_error()`` — the maximum *absolute* active-room error vs the
   shared setpoint (R14.1).
 * ``get_room_signed_error(room_id)`` — per-room **signed** error where a
@@ -52,9 +52,7 @@ def _build(rooms, *, strategy="balance", unit="°C", thermostat="climate.t", tar
     vents = {}
     assignments = {}
     for r in rooms:
-        vents[r["id"]] = _vent(
-            r["id"], f"room_{r['id']}", r["name"], r["temp"], r["active"], r["open"]
-        )
+        vents[r["id"]] = _vent(r["id"], f"room_{r['id']}", r["name"], r["temp"], r["active"], r["open"])
         assignments[r["id"]] = {
             const.CONF_THERMOSTAT_ENTITY: thermostat,
             const.CONF_TEMP_SENSOR_ENTITY: None,
@@ -156,7 +154,7 @@ def test_signed_error_negative_for_overheated_room_heating():
     ]
     coord, _api, thermostat, data = _build(rooms, target_temp=21.0)
     # Heating setpoint comes from the thermostat 'temperature' attribute.
-    coord.data["vents"]  # noqa: B018
+    coord.data["vents"]
     _run(coord, thermostat, data, action="heating")
     # Heating: signed = setpoint - temp -> overheated (23 > 21) is negative.
     assert coord.get_room_signed_error("room_hot") < 0
@@ -191,7 +189,7 @@ def test_per_strategy_spread_metrics_recorded():
 # 24h rolling counters (R14.1)
 # ---------------------------------------------------------------------------
 def test_recalc_and_hold_24h_counters_prune_old_events():
-    coord, _api, thermostat, _data = _build(_ROOMS)
+    coord, _api, _thermostat, _data = _build(_ROOMS)
     now = datetime.now(UTC)
     coord._recalc_events = [now - timedelta(hours=30), now - timedelta(hours=1)]
     coord._hold_events = [now - timedelta(hours=48), now - timedelta(minutes=5), now]

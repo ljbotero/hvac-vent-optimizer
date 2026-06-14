@@ -48,7 +48,12 @@ import sys as _sys
 
 import pytest
 
-_LEARNING_PATH = _pathlib.Path(__file__).resolve().parent.parent / "custom_components" / "hvac_vent_optimizer" / "learning.py"
+_LEARNING_PATH = (
+    _pathlib.Path(__file__).resolve().parent.parent
+    / "custom_components"
+    / "hvac_vent_optimizer"
+    / "learning.py"
+)
 
 
 def _load_learning():

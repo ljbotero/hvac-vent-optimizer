@@ -24,6 +24,8 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from hvac_vent_optimizer import const, context, learning
 from tests._fakes import FakeApi, FakeEntry, FakeHass, FakeState
 
@@ -417,3 +419,289 @@ def test_balance_apply_path_uses_learned_regime_rate():
     # learned hot-regime rate is used instead of the cold baseline.
     assert calls.get("b") == 100
     assert calls.get("a", 0) < 100
+
+
+# ---------------------------------------------------------------------------
+# 6. The coordinator holds the per-room door-factor models (Task 6 / R26.4).
+#
+# Door leakage is learned per room/per mode as a multiplicative residual, keyed
+# the same way as the room-efficiency models: by room name, falling back to the
+# vent id when the room is unnamed. A fresh coordinator starts with an empty
+# store. These are tests-first for the in-memory store that Task 6.2 adds.
+# ---------------------------------------------------------------------------
+def test_fresh_coordinator_has_empty_door_factor_models():
+    coord, _hass, _api, _therm, _data = _build(
+        [{"id": "v1", "name": "Room1", "temp": 27.0, "active": True, "open": 0, "eff": 0.05}],
+    )
+    # A fresh coordinator exposes an empty door-factor store (R26.4).
+    assert isinstance(coord._door_factor_models, dict)
+    assert coord._door_factor_models == {}
+
+
+def test_door_factor_models_keyed_by_room_name_falling_back_to_vent_id():
+    coord, _hass, _api, _therm, data = _build(
+        [{"id": "v1", "name": "Room1", "temp": 27.0, "active": True, "open": 0, "eff": 0.05}],
+    )
+    door_models = coord._door_factor_models
+    room_models = coord._room_efficiency_models
+    assert isinstance(door_models, dict)
+    assert door_models == {}
+
+    # Named room -> key is the room name, identical to the room-efficiency
+    # derivation (``_get_room_name(...) or vent_id``) so the two stores stay
+    # consistent (R26.4).
+    named_key = coord._get_room_name("v1", data) or "v1"
+    assert named_key == "Room1"
+    door_models[named_key] = learning.new_door_factor_model()
+    room_models[named_key] = learning.new_room_model()
+    assert set(door_models) == set(room_models) == {"Room1"}
+
+    # Unnamed room -> the key falls back to the vent id, exactly as the
+    # room-efficiency store does.
+    data["vents"]["v1"]["room"]["attributes"].pop("name", None)
+    fallback_key = coord._get_room_name("v1", data) or "v1"
+    assert fallback_key == "v1"
+    door_models[fallback_key] = learning.new_door_factor_model()
+    room_models[fallback_key] = learning.new_room_model()
+    assert set(door_models) == set(room_models) == {"Room1", "v1"}
+
+
+# ---------------------------------------------------------------------------
+# 7. The learning-write split: door-open -> door learner, door-closed ->
+#    room model (Task 7 / D11 / R29.1 / R29.2 / R28.4 / R26.3).
+#
+# These are tests-first (red) for Task 7.2. Today ``_update_room_efficiency_model``
+# folds EVERY observed sample into the ``RoomEfficiencyModel`` regardless of door
+# state, so a door-open sample both lowers the door-closed reference AND is
+# discounted again by the door multiplier at read time — a latent double-count.
+# After Task 7 the seam must route a door-open full-open sample to the per-room
+# ``DoorFactorModel`` (ratio = sample/ref, clamped) and leave the room model
+# untouched; a door-closed/door-unknown sample keeps feeding the room model
+# exactly as today.
+# ---------------------------------------------------------------------------
+def test_door_open_sample_routes_to_door_learner_not_room_model():
+    """doors_open + ref>0: residual ratio -> door learner; room model untouched."""
+    coord, hass, _api, _therm, data = _build(
+        [{"id": "v1", "name": "Room1", "temp": 27.0, "active": True, "open": 0, "eff": 0.5}],
+        outdoor_entity="sensor.outdoor",
+        door_assignments={"v1": "binary_sensor.door"},
+    )
+    # A trusted day-hot (regime 1) cell gives a clean, positive door-closed ref.
+    _seed_room_model(coord, "Room1", baseline=0.02, hot_rate=0.08)
+    hass.states.set("sensor.outdoor", FakeState("32.0", {"unit_of_measurement": "°C"}))
+    hass.states.set("sun.sun", FakeState("above_horizon"))
+    hass.states.set("binary_sensor.door", FakeState("on"))
+
+    model = coord._room_efficiency_models["Room1"]
+    ctx = coord._build_context("v1", data)
+    regime = context.regime_index(ctx)
+    assert ctx.doors_open is True
+    assert regime == 1  # day-hot
+
+    ref = learning.effective_rate(model, regime, "cooling")
+    assert ref > 0
+    assert abs(ref - 0.08) < 1e-9
+
+    # Snapshot the room model reference (baseline + the selected regime cell).
+    baseline_before = model.cooling.baseline
+    cell = model.cooling.regimes[regime]
+    cell_rate_before, cell_n_before = cell.rate, cell.n
+
+    sample = 0.06  # ratio = 0.06 / 0.08 = 0.75, inside [0.5, 1.0]
+    coord._update_room_efficiency_model("v1", "cooling", sample)
+
+    # D11 / R29.1: the door-open sample is NOT folded into the room model, so the
+    # door-closed reference (baseline + selected regime cell) is left untouched.
+    assert model.cooling.baseline == baseline_before
+    assert model.cooling.regimes[regime].rate == cell_rate_before
+    assert model.cooling.regimes[regime].n == cell_n_before
+
+    # R26.3 / R28.2: the clamped residual ratio seeds the room's door-factor cell.
+    door_model = coord._door_factor_models.get("Room1")
+    assert door_model is not None
+    expected = learning.update_door_factor(learning.new_door_factor_model(), sample / ref, "cooling")
+    assert door_model.cooling.n == 1
+    assert door_model.cooling.factor == pytest.approx(expected.cooling.factor)
+    assert door_model.cooling.factor == pytest.approx(sample / ref)
+    # R27.1: only the active mode advances.
+    assert door_model.heating.factor is None
+    assert door_model.heating.n == 0
+
+
+def test_door_open_with_cold_reference_skips_both_learners():
+    """doors_open + ref<=0: no ratio can be formed -> neither learner updates."""
+    coord, hass, _api, _therm, data = _build(
+        [{"id": "v1", "name": "Room1", "temp": 27.0, "active": True, "open": 0, "eff": 0.5}],
+        outdoor_entity="sensor.outdoor",
+        door_assignments={"v1": "binary_sensor.door"},
+    )
+    # A cold room model: no baseline, no trusted regime -> effective_rate == 0.
+    cold = learning.new_room_model()
+    coord._room_efficiency_models["Room1"] = cold
+    hass.states.set("sensor.outdoor", FakeState("32.0", {"unit_of_measurement": "°C"}))
+    hass.states.set("sun.sun", FakeState("above_horizon"))
+    hass.states.set("binary_sensor.door", FakeState("on"))
+
+    ctx = coord._build_context("v1", data)
+    regime = context.regime_index(ctx)
+    assert ctx.doors_open is True
+    assert learning.effective_rate(cold, regime, "cooling") == 0.0
+
+    coord._update_room_efficiency_model("v1", "cooling", 0.06)
+
+    # R28.4 / A7: ref <= 0 cannot form a ratio -> NO door-factor update.
+    door_model = coord._door_factor_models.get("Room1")
+    assert door_model is None or (door_model.cooling.n == 0 and door_model.cooling.factor is None)
+    # D11 / R29.1: a door-open sample is never folded into the room model.
+    assert cold.cooling.baseline is None
+    assert all(c.n == 0 for c in cold.cooling.regimes)
+
+
+def test_door_closed_sample_updates_room_model_only():
+    """doors_open is False: room model updates exactly as today; door untouched."""
+    coord, hass, _api, _therm, data = _build(
+        [{"id": "v1", "name": "Room1", "temp": 27.0, "active": True, "open": 0, "eff": 0.5}],
+        outdoor_entity="sensor.outdoor",
+        door_assignments={"v1": "binary_sensor.door"},
+    )
+    hass.states.set("sensor.outdoor", FakeState("32.0", {"unit_of_measurement": "°C"}))
+    hass.states.set("sun.sun", FakeState("above_horizon"))
+    hass.states.set("binary_sensor.door", FakeState("off"))  # doors closed
+
+    ctx = coord._build_context("v1", data)
+    regime = context.regime_index(ctx)
+    assert ctx.doors_open is False
+
+    # The post-state must equal a fresh room model fed the same sample/regime.
+    expected = learning.new_room_model()
+    learning.update_room_efficiency(expected, 0.06, regime, "cooling")
+
+    coord._update_room_efficiency_model("v1", "cooling", 0.06)
+
+    model = coord._room_efficiency_models.get("Room1")
+    assert model is not None
+    assert model.cooling.baseline == pytest.approx(expected.cooling.baseline)
+    assert model.cooling.n == expected.cooling.n
+    assert model.cooling.regimes[regime].n == expected.cooling.regimes[regime].n
+    assert model.cooling.regimes[regime].rate == pytest.approx(expected.cooling.regimes[regime].rate)
+    # R29.2: a door-closed sample never touches the door learner.
+    assert "Room1" not in coord._door_factor_models or coord._door_factor_models["Room1"].cooling.n == 0
+
+
+def test_door_unknown_sample_updates_room_model_only():
+    """doors_open is None (no sensor): room model updates as today; door untouched."""
+    coord, hass, _api, _therm, data = _build(
+        [{"id": "v1", "name": "Room1", "temp": 27.0, "active": True, "open": 0, "eff": 0.5}],
+        outdoor_entity="sensor.outdoor",
+    )
+    hass.states.set("sensor.outdoor", FakeState("32.0", {"unit_of_measurement": "°C"}))
+    hass.states.set("sun.sun", FakeState("above_horizon"))
+
+    ctx = coord._build_context("v1", data)
+    regime = context.regime_index(ctx)
+    assert ctx.doors_open is None
+
+    expected = learning.new_room_model()
+    learning.update_room_efficiency(expected, 0.06, regime, "cooling")
+
+    coord._update_room_efficiency_model("v1", "cooling", 0.06)
+
+    model = coord._room_efficiency_models.get("Room1")
+    assert model is not None
+    assert model.cooling.baseline == pytest.approx(expected.cooling.baseline)
+    assert model.cooling.regimes[regime].n == expected.cooling.regimes[regime].n
+    # R29.2: door state unknown -> door learner stays untouched.
+    assert "Room1" not in coord._door_factor_models or coord._door_factor_models["Room1"].cooling.n == 0
+
+
+# ---------------------------------------------------------------------------
+# 6. Read-time resolution of the LEARNED door factor (Task 8.1 — tests-first).
+# ---------------------------------------------------------------------------
+# These pin the post-Task-8.2 contract of ``_get_room_effective_rate``: while a
+# room's door is open it must apply the *learned* per-room door factor resolved
+# from ``self._door_factor_models`` (A7 "Apply"), not the flat module
+# ``DOOR_FACTOR`` constant. Until Task 8.2 wires
+# ``resolve_door_factor(self._door_factor_models.get(room_name), mode)`` into the
+# ``apply_context_multipliers`` call, the coordinator still passes no
+# ``door_factor`` and therefore applies the legacy flat ``0.9`` — so the trusted
+# -cell test below is EXPECTED TO FAIL (red). The fallback / doors-closed tests
+# are behavior-preservation guards that already hold today and must keep holding
+# after Task 8.2.
+#
+# Requirements: R26.1, R26.5, R27.4.
+# ---------------------------------------------------------------------------
+def _seed_door_model(coord, room_name, *, cooling_factor, n=None):
+    """Seed a trusted cooling :class:`learning.DoorFactorCell` for ``room_name``.
+
+    Mirrors ``_seed_room_model``: builds a fresh door-factor model via
+    :func:`learning.new_door_factor_model` and replaces its cooling cell with a
+    trusted one (``n >= DOOR_MIN_N``, ``factor`` present) using
+    :class:`learning.DoorFactorCell`.
+    """
+    model = learning.new_door_factor_model()
+    model.cooling = learning.DoorFactorCell(
+        factor=cooling_factor,
+        n=learning.DOOR_MIN_N if n is None else n,
+    )
+    coord._door_factor_models[room_name] = model
+    return model
+
+
+def test_effective_rate_applies_trusted_learned_door_factor_when_doors_open():
+    coord, hass, _api, _therm, data = _build(
+        [{"id": "v1", "name": "Room1", "temp": 27.0, "active": True, "open": 0, "eff": 0.5}],
+        outdoor_entity="sensor.outdoor",
+        door_assignments={"v1": "binary_sensor.door"},
+    )
+    # Trusted day-hot (regime 1) learned cooling rate of 0.08.
+    _seed_room_model(coord, "Room1", baseline=0.02, hot_rate=0.08)
+    # Trusted learned cooling door factor of 0.7 (n >= DOOR_MIN_N).
+    _seed_door_model(coord, "Room1", cooling_factor=0.7)
+    hass.states.set("sensor.outdoor", FakeState("32.0", {"unit_of_measurement": "°C"}))
+    hass.states.set("sun.sun", FakeState("above_horizon"))
+    hass.states.set("binary_sensor.door", FakeState("on"))
+
+    rate = coord._get_room_effective_rate("v1", "cooling", data)
+    # day-hot trusted -> learned rate 0.08; doors open -> the LEARNED door factor
+    # 0.7 must be applied (NOT the flat DOOR_FACTOR=0.9), within the combined
+    # [FACTOR_MIN, FACTOR_MAX] clamp (here just 0.7).
+    expected = 0.08 * max(context.FACTOR_MIN, min(context.FACTOR_MAX, 0.7))
+    assert abs(rate - expected) < 1e-9
+
+
+def test_effective_rate_falls_back_to_flat_door_factor_when_no_door_model():
+    coord, hass, _api, _therm, data = _build(
+        [{"id": "v1", "name": "Room1", "temp": 27.0, "active": True, "open": 0, "eff": 0.5}],
+        outdoor_entity="sensor.outdoor",
+        door_assignments={"v1": "binary_sensor.door"},
+    )
+    _seed_room_model(coord, "Room1", baseline=0.02, hot_rate=0.08)
+    # No door model seeded -> resolve_door_factor(None, ...) == DOOR_FACTOR_DEFAULT
+    # (0.9), so the read-time behavior is bit-for-bit the legacy flat fallback.
+    hass.states.set("sensor.outdoor", FakeState("32.0", {"unit_of_measurement": "°C"}))
+    hass.states.set("sun.sun", FakeState("above_horizon"))
+    hass.states.set("binary_sensor.door", FakeState("on"))
+
+    rate = coord._get_room_effective_rate("v1", "cooling", data)
+    # Legacy DOOR_FACTOR (0.9) fallback preserved when no door model exists.
+    expected = 0.08 * context.DOOR_FACTOR
+    assert abs(rate - expected) < 1e-9
+
+
+def test_effective_rate_door_term_neutral_when_doors_closed():
+    coord, hass, _api, _therm, data = _build(
+        [{"id": "v1", "name": "Room1", "temp": 27.0, "active": True, "open": 0, "eff": 0.5}],
+        outdoor_entity="sensor.outdoor",
+        door_assignments={"v1": "binary_sensor.door"},
+    )
+    _seed_room_model(coord, "Room1", baseline=0.02, hot_rate=0.08)
+    # Even with a trusted learned door cell present, a CLOSED door must apply no
+    # door discount (the door term is neutral 1.0).
+    _seed_door_model(coord, "Room1", cooling_factor=0.7)
+    hass.states.set("sensor.outdoor", FakeState("32.0", {"unit_of_measurement": "°C"}))
+    hass.states.set("sun.sun", FakeState("above_horizon"))
+    hass.states.set("binary_sensor.door", FakeState("off"))
+
+    rate = coord._get_room_effective_rate("v1", "cooling", data)
+    # doors closed -> door term neutral -> just the learned rate, no discount.
+    assert abs(rate - 0.08) < 1e-9

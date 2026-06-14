@@ -20,7 +20,14 @@ Concepts
   i.e. the regimes only distinguish *hot* from *not-hot*.
 * ``apply_context_multipliers`` applies bounded secondary multipliers
   (occupancy, open doors) to a learned rate, clamped to
-  ``[FACTOR_MIN, FACTOR_MAX]``.
+  ``[FACTOR_MIN, FACTOR_MAX]``. The open-door term is no longer a flat magic
+  number: callers pass an already-resolved, per-room/per-mode ``door_factor``
+  learned in ``learning.py`` (``resolve_door_factor``), which replaces the
+  module :data:`DOOR_FACTOR` constant while doors are open. :data:`DOOR_FACTOR`
+  (``0.9``) is retained only as the cold-start fallback used when
+  ``door_factor`` is ``None`` (pre-feature behavior). See the door-leakage
+  -learning spec (Requirements 26-30, decisions D10-D12). This module stays
+  pure and knows nothing about the learner.
 """
 
 from __future__ import annotations
@@ -41,6 +48,10 @@ DAY_END: int = 21
 
 # Secondary multipliers (cooling): occupants add heat and open doors leak
 # conditioned air, both of which slow the observed cooling rate (~0.9x).
+# OCC_FACTOR is still applied directly. DOOR_FACTOR is now only the cold-start
+# fallback for the door term: a learned per-room/per-mode factor (resolved in
+# learning.py) is threaded in via apply_context_multipliers(door_factor=...)
+# and used in preference whenever it is available.
 OCC_FACTOR: float = 0.9
 DOOR_FACTOR: float = 0.9
 
@@ -142,17 +153,28 @@ def regime_index(ctx: Context) -> int:
 # ---------------------------------------------------------------------------
 # Secondary multipliers
 # ---------------------------------------------------------------------------
-def apply_context_multipliers(rate: float, ctx: Context, mode: str = "cooling") -> float:
+def apply_context_multipliers(
+    rate: float,
+    ctx: Context,
+    mode: str = "cooling",
+    door_factor: float | None = None,
+) -> float:
     """Apply bounded secondary multipliers to a learned ``rate``.
 
     Occupancy and open doors each scale the rate (compounding when both apply);
     ``None`` / ``False`` readings contribute a neutral ``1.0``. The combined
     multiplier is clamped to ``[FACTOR_MIN, FACTOR_MAX]`` before being applied.
+
+    When ``door_factor`` is provided it replaces the module :data:`DOOR_FACTOR`
+    constant for the door term while doors are open; the constant remains the
+    documented fallback used when ``door_factor`` is ``None``. The door term is
+    only applied while ``ctx.doors_open`` is ``True`` (neutral ``1.0``
+    otherwise), and the occupancy term is unchanged.
     """
     factor = 1.0
     if ctx.occupied is True:
         factor *= OCC_FACTOR
     if ctx.doors_open is True:
-        factor *= DOOR_FACTOR
+        factor *= door_factor if door_factor is not None else DOOR_FACTOR
     factor = max(FACTOR_MIN, min(FACTOR_MAX, factor))
     return rate * factor

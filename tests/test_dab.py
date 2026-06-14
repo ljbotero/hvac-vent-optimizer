@@ -10,6 +10,7 @@ which is not installed). Either of these works:
     cd tests && python3 -m pytest test_dab.py -q
     python3 -m pytest tests/test_dab.py -q --rootdir=tests --import-mode=importlib
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -19,7 +20,9 @@ import sys
 
 import pytest
 
-_DAB_PATH = pathlib.Path(__file__).resolve().parent.parent / "custom_components" / "hvac_vent_optimizer" / "dab.py"
+_DAB_PATH = (
+    pathlib.Path(__file__).resolve().parent.parent / "custom_components" / "hvac_vent_optimizer" / "dab.py"
+)
 _spec = importlib.util.spec_from_file_location("hvo_dab", _DAB_PATH)
 dab = importlib.util.module_from_spec(_spec)
 # Register before exec so dataclasses introspection (with `from __future__
@@ -151,27 +154,37 @@ def test_should_pre_adjust_unknown_mode_returns_false():
 # calculate_room_change_rate
 # ---------------------------------------------------------------------------
 def test_room_change_rate_runtime_below_min_minutes_returns_negative_one():
-    assert dab.calculate_room_change_rate(25.0, 24.0, total_minutes=0.5, percent_open=50, current_rate=0.0) == -1
+    assert (
+        dab.calculate_room_change_rate(25.0, 24.0, total_minutes=0.5, percent_open=50, current_rate=0.0) == -1
+    )
 
 
 def test_room_change_rate_runtime_below_min_runtime_returns_negative_one():
     # 3 minutes is >= min_minutes_to_setpoint(1.0) but < min_runtime_for_rate_calc(5.0)
-    assert dab.calculate_room_change_rate(25.0, 24.0, total_minutes=3.0, percent_open=50, current_rate=0.0) == -1
+    assert (
+        dab.calculate_room_change_rate(25.0, 24.0, total_minutes=3.0, percent_open=50, current_rate=0.0) == -1
+    )
 
 
 def test_room_change_rate_percent_open_non_positive_returns_negative_one():
-    assert dab.calculate_room_change_rate(25.0, 24.0, total_minutes=10.0, percent_open=0, current_rate=0.0) == -1
+    assert (
+        dab.calculate_room_change_rate(25.0, 24.0, total_minutes=10.0, percent_open=0, current_rate=0.0) == -1
+    )
 
 
 def test_room_change_rate_tiny_diff_open_enough_returns_min_rate():
     # diff 0.05 < min_detectable_temp_change(0.1), percent_open>=30 -> min_temp_change_rate
-    result = dab.calculate_room_change_rate(25.0, 24.95, total_minutes=10.0, percent_open=50, current_rate=0.0)
+    result = dab.calculate_room_change_rate(
+        25.0, 24.95, total_minutes=10.0, percent_open=50, current_rate=0.0
+    )
     assert result == pytest.approx(S.min_temp_change_rate)
 
 
 def test_room_change_rate_tiny_diff_barely_open_returns_negative_one():
     # diff < min_detectable and percent_open < 30 -> -1
-    result = dab.calculate_room_change_rate(25.0, 24.95, total_minutes=10.0, percent_open=20, current_rate=0.0)
+    result = dab.calculate_room_change_rate(
+        25.0, 24.95, total_minutes=10.0, percent_open=20, current_rate=0.0
+    )
     assert result == -1
 
 
@@ -184,7 +197,9 @@ def test_room_change_rate_exceeds_max_rate_returns_negative_one():
 def test_room_change_rate_normal_path_returns_computed_rate():
     # diff 1.0 over 10 min -> rate 0.1; current_rate 0.1 -> max_rate 0.1;
     # p_open 1.0 -> approx_rate = (0.1/0.1)/1.0 = 1.0 (within [min,max]).
-    result = dab.calculate_room_change_rate(25.0, 24.0, total_minutes=10.0, percent_open=100, current_rate=0.1)
+    result = dab.calculate_room_change_rate(
+        25.0, 24.0, total_minutes=10.0, percent_open=100, current_rate=0.1
+    )
     assert result == pytest.approx(1.0)
 
 
@@ -192,7 +207,9 @@ def test_room_change_rate_below_min_rate_returns_min_rate():
     # current_rate much larger than rate drives approx_rate below min_temp_change_rate.
     # diff 1.0 / 10 = 0.1 rate; current_rate 1000 -> rate/max_rate = 0.0001;
     # /p_open(1.0) = 0.0001 < min(0.001) -> returns min_temp_change_rate.
-    result = dab.calculate_room_change_rate(25.0, 24.0, total_minutes=10.0, percent_open=100, current_rate=1000.0)
+    result = dab.calculate_room_change_rate(
+        25.0, 24.0, total_minutes=10.0, percent_open=100, current_rate=1000.0
+    )
     assert result == pytest.approx(S.min_temp_change_rate)
 
 
@@ -201,35 +218,58 @@ def test_room_change_rate_below_min_rate_returns_min_rate():
 # ---------------------------------------------------------------------------
 def test_vent_open_percentage_already_at_setpoint_returns_zero():
     # cooling, start_temp <= setpoint -> reached -> 0.0
-    assert dab.calculate_vent_open_percentage(
-        "room", start_temp=24.0, setpoint=24.0, hvac_mode="cooling",
-        max_rate=0.2, longest_time=20.0,
-    ) == 0.0
+    assert (
+        dab.calculate_vent_open_percentage(
+            "room",
+            start_temp=24.0,
+            setpoint=24.0,
+            hvac_mode="cooling",
+            max_rate=0.2,
+            longest_time=20.0,
+        )
+        == 0.0
+    )
 
 
 def test_vent_open_percentage_zero_max_rate_returns_full_open():
-    assert dab.calculate_vent_open_percentage(
-        "room", start_temp=26.0, setpoint=24.0, hvac_mode="cooling",
-        max_rate=0.0, longest_time=20.0,
-    ) == 100.0
+    assert (
+        dab.calculate_vent_open_percentage(
+            "room",
+            start_temp=26.0,
+            setpoint=24.0,
+            hvac_mode="cooling",
+            max_rate=0.0,
+            longest_time=20.0,
+        )
+        == 100.0
+    )
 
 
 def test_vent_open_percentage_zero_longest_time_returns_full_open():
-    assert dab.calculate_vent_open_percentage(
-        "room", start_temp=26.0, setpoint=24.0, hvac_mode="cooling",
-        max_rate=0.2, longest_time=0.0,
-    ) == 100.0
+    assert (
+        dab.calculate_vent_open_percentage(
+            "room",
+            start_temp=26.0,
+            setpoint=24.0,
+            hvac_mode="cooling",
+            max_rate=0.2,
+            longest_time=0.0,
+        )
+        == 100.0
+    )
 
 
 def test_vent_open_percentage_mid_range_matches_exponential_formula():
     start_temp, setpoint, max_rate, longest_time = 26.0, 24.0, 0.2, 20.0
     target_rate = abs(setpoint - start_temp) / longest_time
-    expected = dab.round_big_decimal(
-        S.base_const * math.exp((target_rate / max_rate) * S.exp_const) * 100, 3
-    )
+    expected = dab.round_big_decimal(S.base_const * math.exp((target_rate / max_rate) * S.exp_const) * 100, 3)
     result = dab.calculate_vent_open_percentage(
-        "room", start_temp=start_temp, setpoint=setpoint, hvac_mode="cooling",
-        max_rate=max_rate, longest_time=longest_time,
+        "room",
+        start_temp=start_temp,
+        setpoint=setpoint,
+        hvac_mode="cooling",
+        max_rate=max_rate,
+        longest_time=longest_time,
     )
     assert result == pytest.approx(expected)
     assert 0.0 <= result <= 100.0
@@ -238,8 +278,12 @@ def test_vent_open_percentage_mid_range_matches_exponential_formula():
 def test_vent_open_percentage_clamps_to_hundred():
     # Large target_rate relative to max_rate drives the formula well above 100.
     result = dab.calculate_vent_open_percentage(
-        "room", start_temp=40.0, setpoint=24.0, hvac_mode="cooling",
-        max_rate=0.1, longest_time=5.0,
+        "room",
+        start_temp=40.0,
+        setpoint=24.0,
+        hvac_mode="cooling",
+        max_rate=0.1,
+        longest_time=5.0,
     )
     assert result == 100.0
 
@@ -324,9 +368,7 @@ def test_all_vents_low_rate_returns_full_open():
 
 def test_all_vents_delegates_to_single_vent_calculation():
     vents = {"a": {"temp": 26.0, "rate": 0.2, "active": True, "name": "A"}}
-    expected = dab.calculate_vent_open_percentage(
-        "A", 26.0, 24.0, "cooling", 0.2, 20.0
-    )
+    expected = dab.calculate_vent_open_percentage("A", 26.0, 24.0, "cooling", 0.2, 20.0)
     result = dab.calculate_open_percentage_for_all_vents(
         vents, "cooling", setpoint=24.0, longest_time=20.0, close_inactive=True
     )
@@ -349,9 +391,7 @@ def test_adjust_min_airflow_raises_below_minimum_combined_flow():
     before = _combined(vents, calc, ["a", "b"])
     assert before < S.min_combined_vent_flow
 
-    result = dab.adjust_for_minimum_airflow(
-        vents, "cooling", calc, additional_standard_vents=0, settings=S
-    )
+    result = dab.adjust_for_minimum_airflow(vents, "cooling", calc, additional_standard_vents=0, settings=S)
     after = _combined(vents, result, ["a", "b"])
 
     # Combined flow is driven up toward the minimum (loop terminates within
@@ -366,9 +406,7 @@ def test_adjust_min_airflow_above_minimum_returns_unchanged():
         "b": {"temp": 24.0, "active": True},
     }
     calc = {"a": 40.0, "b": 40.0}
-    result = dab.adjust_for_minimum_airflow(
-        vents, "cooling", calc, additional_standard_vents=0, settings=S
-    )
+    result = dab.adjust_for_minimum_airflow(vents, "cooling", calc, additional_standard_vents=0, settings=S)
     assert result is calc
     assert result == {"a": 40.0, "b": 40.0}
 
@@ -380,8 +418,13 @@ def test_adjust_min_airflow_active_only_falls_back_to_inactive_when_needed():
     calc = {"a": 5.0}
     before = calc["a"]
     result = dab.adjust_for_minimum_airflow(
-        vents, "cooling", calc, additional_standard_vents=0, settings=S,
-        active_only=True, allow_inactive_if_needed=True,
+        vents,
+        "cooling",
+        calc,
+        additional_standard_vents=0,
+        settings=S,
+        active_only=True,
+        allow_inactive_if_needed=True,
     )
     # No active vents -> falls back to the inactive vent and raises its flow.
     assert result["a"] > before
@@ -393,8 +436,13 @@ def test_adjust_min_airflow_no_devices_without_inactive_fallback_returns_unchang
     }
     calc = {"a": 5.0}
     result = dab.adjust_for_minimum_airflow(
-        vents, "cooling", calc, additional_standard_vents=0, settings=S,
-        active_only=True, allow_inactive_if_needed=False,
+        vents,
+        "cooling",
+        calc,
+        additional_standard_vents=0,
+        settings=S,
+        active_only=True,
+        allow_inactive_if_needed=False,
     )
     assert result is calc
     assert result == {"a": 5.0}

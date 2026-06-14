@@ -1,4 +1,5 @@
 """Minor fixes: manifest metadata and a missing options translation step."""
+
 from __future__ import annotations
 
 import json

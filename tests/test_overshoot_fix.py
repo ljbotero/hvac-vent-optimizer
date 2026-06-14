@@ -11,6 +11,7 @@ These tests pin the corrected directional behavior: all four legacy strategies
 
 Coordinator tests use the Home Assistant fakes installed by ``conftest.py``.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -102,10 +103,8 @@ def _build_two_room_cooling_coordinator(make_coordinator):
     }
     options = {
         const.CONF_VENT_ASSIGNMENTS: {
-            hot_id: {const.CONF_THERMOSTAT_ENTITY: thermostat,
-                     const.CONF_TEMP_SENSOR_ENTITY: None},
-            bath_id: {const.CONF_THERMOSTAT_ENTITY: thermostat,
-                      const.CONF_TEMP_SENSOR_ENTITY: None},
+            hot_id: {const.CONF_THERMOSTAT_ENTITY: thermostat, const.CONF_TEMP_SENSOR_ENTITY: None},
+            bath_id: {const.CONF_THERMOSTAT_ENTITY: thermostat, const.CONF_TEMP_SENSOR_ENTITY: None},
         },
         const.CONF_CONTROL_STRATEGY: "hybrid",
         # Enough conventional vents that the floor is met without the smart vents.
@@ -130,13 +129,11 @@ def _build_two_room_cooling_coordinator(make_coordinator):
 
 
 def test_hybrid_does_not_reopen_satisfied_bathroom(make_coordinator):
-    coord, _hass, api, thermostat, hot_id, bath_id, data = (
-        _build_two_room_cooling_coordinator(make_coordinator)
+    coord, _hass, api, thermostat, hot_id, bath_id, data = _build_two_room_cooling_coordinator(
+        make_coordinator
     )
 
-    asyncio.run(
-        coord._async_apply_dab_adjustments(thermostat, "cooling", [hot_id, bath_id], data)
-    )
+    asyncio.run(coord._async_apply_dab_adjustments(thermostat, "cooling", [hot_id, bath_id], data))
 
     # The hot room must still be conditioned (sanity: the apply path ran).
     hot_cmds = [pct for (vid, pct) in api.set_vent_calls if vid == hot_id]
@@ -144,6 +141,6 @@ def test_hybrid_does_not_reopen_satisfied_bathroom(make_coordinator):
 
     # The overcooled bathroom must never be commanded open.
     bath_cmds = [pct for (vid, pct) in api.set_vent_calls if vid == bath_id]
-    assert all(pct == 0 for pct in bath_cmds), (
-        f"satisfied bathroom must not be reopened; got commands {bath_cmds}"
-    )
+    assert all(
+        pct == 0 for pct in bath_cmds
+    ), f"satisfied bathroom must not be reopened; got commands {bath_cmds}"

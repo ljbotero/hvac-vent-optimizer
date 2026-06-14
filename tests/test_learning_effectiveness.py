@@ -46,6 +46,7 @@ Worked numeric example (n >= MODEL_MIN_N):
       predicted_rate(0.25, 0.2, 50)        = 0.25 * 0.6    = 0.15
 ====================================================================
 """
+
 from __future__ import annotations
 
 import importlib.util as _importlib_util
@@ -54,7 +55,12 @@ import sys as _sys
 
 import pytest
 
-_LEARNING_PATH = _pathlib.Path(__file__).resolve().parent.parent / "custom_components" / "hvac_vent_optimizer" / "learning.py"
+_LEARNING_PATH = (
+    _pathlib.Path(__file__).resolve().parent.parent
+    / "custom_components"
+    / "hvac_vent_optimizer"
+    / "learning.py"
+)
 
 
 def _load_learning():
@@ -177,7 +183,7 @@ def test_flow_midpoint_concrete(learn):
 def test_flow_strictly_non_decreasing_in_aperture(learn):
     for leak in (0.0, 0.1, 0.2, 0.35):
         prev = None
-        for step in range(0, 101):
+        for step in range(101):
             a = step / 100.0
             val = learn.flow(leak, a)
             if prev is not None:
@@ -189,15 +195,15 @@ def test_flow_strictly_non_decreasing_in_aperture(learn):
 
 def test_flow_result_stays_in_unit_interval(learn):
     for leak in (0.0, 0.1, 0.35):
-        for step in range(0, 101):
+        for step in range(101):
             val = learn.flow(leak, step / 100.0)
             assert 0.0 <= val <= 1.0
 
 
 def test_flow_clamps_out_of_range_aperture(learn):
     # aperture fractions outside [0,1] clamp; no negatives, no overflow
-    assert learn.flow(0.2, -0.5) == pytest.approx(0.2)   # clamps to a=0 -> leak
-    assert learn.flow(0.2, 1.5) == pytest.approx(1.0)    # clamps to a=1 -> 1.0
+    assert learn.flow(0.2, -0.5) == pytest.approx(0.2)  # clamps to a=0 -> leak
+    assert learn.flow(0.2, 1.5) == pytest.approx(1.0)  # clamps to a=1 -> 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -224,7 +230,7 @@ def test_predicted_rate_matches_flow_composition(learn):
 
 def test_predicted_rate_non_decreasing_in_aperture(learn):
     prev = None
-    for pct in range(0, 101):
+    for pct in range(101):
         val = learn.predicted_rate(0.25, 0.2, float(pct))
         if prev is not None:
             assert val >= prev - 1e-12

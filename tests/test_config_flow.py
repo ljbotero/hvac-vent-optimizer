@@ -12,6 +12,7 @@ The Home Assistant / voluptuous stubs installed by ``conftest`` make schema-leve
 is exactly why the handler must clamp explicitly. These tests drive the handler
 directly and inspect the saved options dict.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -204,11 +205,7 @@ def test_menu_includes_context_step():
 
 def test_context_step_persists_outdoor_temp_entity():
     flow = _options_flow()
-    result = _run(
-        flow.async_step_context_settings(
-            {const.CONF_OUTDOOR_TEMP_ENTITY: "sensor.outdoor"}
-        )
-    )
+    result = _run(flow.async_step_context_settings({const.CONF_OUTDOOR_TEMP_ENTITY: "sensor.outdoor"}))
     assert result["type"] == "create_entry"
     assert result["data"][const.CONF_OUTDOOR_TEMP_ENTITY] == "sensor.outdoor"
 

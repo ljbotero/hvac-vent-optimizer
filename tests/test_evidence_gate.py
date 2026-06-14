@@ -95,9 +95,7 @@ def _settings():
     which would make the floor mathematically unreachable once every smart room
     satisfies.
     """
-    return balance.AllocSettings(
-        safety_floor_pct=40.0, conventional_vents=4, conventional_open_pct=50.0
-    )
+    return balance.AllocSettings(safety_floor_pct=40.0, conventional_vents=4, conventional_open_pct=50.0)
 
 
 def _room(room_id: str, temp_c: float, drift: float = 0.0):
@@ -193,14 +191,8 @@ def _gate_metrics(builder) -> dict:
     cmp = simulator.compare(builder(), ["dab", "balance"], to_stdout=False)
     dab = cmp.results["dab"]
     bal = cmp.results["balance"]
-    avg_reduction_pct = (
-        (dab.avg_spread - bal.avg_spread) / dab.avg_spread * 100.0
-        if dab.avg_spread
-        else 0.0
-    )
-    moves_ratio_pct = (
-        bal.total_moves / dab.total_moves * 100.0 if dab.total_moves else 0.0
-    )
+    avg_reduction_pct = (dab.avg_spread - bal.avg_spread) / dab.avg_spread * 100.0 if dab.avg_spread else 0.0
+    moves_ratio_pct = bal.total_moves / dab.total_moves * 100.0 if dab.total_moves else 0.0
     return {
         "table": cmp.table,
         "dab": dab,
@@ -247,8 +239,7 @@ def test_safety_floor_never_violated(name):
     """
     result = simulator.run(SCENARIOS[name](), strategy="balance")
     assert result.min_combined_open_pct >= 40.0 - 1e-6, (
-        f"{name}/balance: combined open dropped to "
-        f"{result.min_combined_open_pct:.2f}% < 40% floor"
+        f"{name}/balance: combined open dropped to " f"{result.min_combined_open_pct:.2f}% < 40% floor"
     )
 
 
@@ -293,9 +284,7 @@ def test_r156_movement_criterion_passes_all_scenarios():
     """R15.6(c) holds for every scenario — the basis for the ship decision."""
     report = r156_ship_gate_report()
     failures = [n for n, r in report.items() if not r["moves_pass"]]
-    assert not failures, (
-        "balance must not exceed 110% of dab's movements: " + ", ".join(failures)
-    )
+    assert not failures, "balance must not exceed 110% of dab's movements: " + ", ".join(failures)
 
 
 def test_r156_spread_gate_waived():
@@ -309,9 +298,7 @@ def test_r156_spread_gate_waived():
     ``balance`` on merit (and updating the docs).
     """
     report = r156_ship_gate_report()
-    spread_unmet = [
-        n for n, r in report.items() if not (r["avg_pass"] and r["max_no_worse"])
-    ]
+    spread_unmet = [n for n, r in report.items() if not (r["avg_pass"] and r["max_no_worse"])]
     assert spread_unmet, (
         "R15.6 spread criteria now PASS for all scenarios — the movement-only "
         "waiver is no longer needed. Promote balance on merit and update "

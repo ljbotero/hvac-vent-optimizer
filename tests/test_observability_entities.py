@@ -55,8 +55,9 @@ def test_new_dab_sensors_report_coordinator_values():
 
 
 def test_active_room_spread_sensor_has_celsius_unit():
-    from hvac_vent_optimizer import sensor as sensor_mod
     from homeassistant.const import UnitOfTemperature
+
+    from hvac_vent_optimizer import sensor as sensor_mod
 
     desc = sensor_mod.ACTIVE_ROOM_SPREAD_DESCRIPTION
     assert desc.native_unit_of_measurement == UnitOfTemperature.CELSIUS

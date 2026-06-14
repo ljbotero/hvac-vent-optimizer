@@ -61,9 +61,7 @@ def _build(
     vents = {}
     assignments = {}
     for r in rooms:
-        vents[r["id"]] = _vent(
-            r["id"], f"room_{r['id']}", r["name"], r["temp"], r["active"], r["open"]
-        )
+        vents[r["id"]] = _vent(r["id"], f"room_{r['id']}", r["name"], r["temp"], r["active"], r["open"])
         assignments[r["id"]] = {
             const.CONF_THERMOSTAT_ENTITY: thermostat,
             const.CONF_TEMP_SENSOR_ENTITY: None,
@@ -143,9 +141,7 @@ def _seed_cycle(coord, thermostat, rooms, *, elapsed_min=10.0, deviations=None):
 
 def _run(coord, thermostat, data):
     vent_ids = list(data["vents"].keys())
-    asyncio.run(
-        coord._async_apply_dab_adjustments(thermostat, "cooling", vent_ids, data)
-    )
+    asyncio.run(coord._async_apply_dab_adjustments(thermostat, "cooling", vent_ids, data))
 
 
 # ---------------------------------------------------------------------------
@@ -164,8 +160,7 @@ def test_balance_airflow_limited_room_does_not_force_false_hold():
     _seed_cycle(coord, thermostat, rooms)
     _run(coord, thermostat, data)
     assert coord._hold_status == "recalculating", (
-        "balance must not hold when a pinned-hot room keeps the active-room "
-        "spread above the guardrail"
+        "balance must not hold when a pinned-hot room keeps the active-room " "spread above the guardrail"
     )
 
 
@@ -218,9 +213,9 @@ def test_balance_airflow_limited_excluded_from_deviation_determination():
     coord, _api, thermostat, data = _build(rooms)
     _seed_cycle(coord, thermostat, rooms, deviations={"bedroom_2": 2.0})
     _run(coord, thermostat, data)
-    assert coord._hold_status == "holding", (
-        "an airflow-limited room's expected deviation must not force a recompute"
-    )
+    assert (
+        coord._hold_status == "holding"
+    ), "an airflow-limited room's expected deviation must not force a recompute"
 
 
 # ---------------------------------------------------------------------------

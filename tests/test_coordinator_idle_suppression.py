@@ -13,6 +13,7 @@ Policy under test:
     active (R3 floor applies "while the HVAC is active"), so it never originates
     from the idle path.
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
@@ -27,8 +28,9 @@ class _Event:
         self.data = {"new_state": new_state}
 
 
-def _set_thermostat(rc, *, hvac_action: str, state: str = "cool",
-                    current_temperature: float = 26.0, temperature: float = 24.0):
+def _set_thermostat(
+    rc, *, hvac_action: str, state: str = "cool", current_temperature: float = 26.0, temperature: float = 24.0
+):
     rc["hass"].states.set(
         rc["thermostat"],
         FakeState(
@@ -75,9 +77,7 @@ async def test_apply_path_reverifies_live_idle_and_skips(ready_coordinator):
     coord = rc["coord"]
     _set_thermostat(rc, hvac_action="idle")
 
-    await coord._async_apply_dab_adjustments(
-        rc["thermostat"], "cooling", [rc["vent_id"]], rc["data"]
-    )
+    await coord._async_apply_dab_adjustments(rc["thermostat"], "cooling", [rc["vent_id"]], rc["data"])
 
     assert rc["api"].set_vent_calls == [], "stale cooling apply must not command while idle"
 

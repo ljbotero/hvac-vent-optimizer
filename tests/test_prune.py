@@ -1,4 +1,5 @@
 """Fix #7: stale efficiency-model pruning must run on every update, not once."""
+
 from __future__ import annotations
 
 

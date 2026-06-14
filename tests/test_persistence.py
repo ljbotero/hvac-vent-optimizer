@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -47,7 +47,7 @@ async def test_save_state_roundtrips_through_initialize(make_coordinator):
 async def test_save_state_serializes_cycle_targets_datetimes(make_coordinator):
     """Regression: cycle_targets datetimes must serialize to isoformat strings."""
     coord, *_ = make_coordinator()
-    now = datetime(2026, 6, 7, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 6, 7, 12, 0, tzinfo=UTC)
     coord._cycle_targets = {
         "climate.t": {
             "targets": {"v1": 50},
@@ -416,3 +416,166 @@ def test_seed_room_model_from_v1_seeds_baseline_and_regimes():
 def test_seed_room_model_from_v1_clamps_negative_seed_to_zero():
     model = seed_room_model_from_v1({"cooling": 0.01}, {"cooling": [-0.5, 0.0, 0.0, 0.0]})
     assert model.cooling.regimes[0].rate == 0.0
+
+
+# ===========================================================================
+# Task 9 — Save/load the ``door_factor`` section (TDD, red) — R29.3 / R29.4
+# ===========================================================================
+# The learned per-room door-leakage models (``self._door_factor_models``) are an
+# additive top-level ``door_factor`` store section, mirroring how
+# ``room_efficiency``/``vent_effectiveness`` are persisted (no STORE_SCHEMA_VERSION
+# bump). These tests assert:
+#   * ``_async_save_state`` writes ``door_factor`` via ``door_factor_to_dict``,
+#     one entry per room in ``self._door_factor_models``;
+#   * ``async_initialize`` loads that section back into ``self._door_factor_models``
+#     (via a tolerant ``_load_door_factor`` helper, added in task 9.2);
+#   * a store with NO ``door_factor`` section loads to an empty map, so every room
+#     resolves to ``0.9`` via ``resolve_door_factor``;
+#   * a malformed ``door_factor`` section is dropped/tolerated WITHOUT affecting
+#     ``room_efficiency``/``vent_effectiveness`` loading.
+from hvac_vent_optimizer.learning import (  # noqa: E402
+    DOOR_FACTOR_DEFAULT,
+    door_factor_to_dict,
+    new_door_factor_model,
+    resolve_door_factor,
+    update_door_factor,
+)
+
+
+def _trusted_door_model(ratio: float = 0.7, mode: str = "cooling", n: int = 6):
+    """A door-factor model whose ``mode`` cell is trusted (n >= DOOR_MIN_N).
+
+    Repeated identical ratios seed then converge the EMA to ``ratio`` exactly, so
+    ``resolve_door_factor`` returns that learned factor rather than the default.
+    """
+    model = new_door_factor_model()
+    for _ in range(n):
+        update_door_factor(model, ratio, mode)
+    return model
+
+
+@pytest.mark.asyncio
+async def test_save_state_persists_door_factor_section(make_coordinator):
+    """``_async_save_state`` must serialize ``door_factor`` via ``door_factor_to_dict``."""
+    coord, *_ = make_coordinator()
+    model = _trusted_door_model(0.7, "cooling")
+    coord._door_factor_models = {"Master": model}
+
+    await coord._async_save_state()
+    saved = coord._store.saved
+
+    assert saved is not None
+    assert "door_factor" in saved, "door_factor models are held in memory but never saved"
+    # One entry per room, serialized via the pure converter.
+    assert saved["door_factor"]["Master"] == door_factor_to_dict(model)
+    assert saved["door_factor"]["Master"]["cooling"]["n"] == 6
+    assert saved["door_factor"]["Master"]["cooling"]["factor"] == pytest.approx(0.7)
+
+
+@pytest.mark.asyncio
+async def test_door_factor_models_roundtrip_through_initialize(make_coordinator):
+    """What ``_async_save_state`` writes must be reloaded by ``async_initialize``."""
+    coord, *_ = make_coordinator()
+    model = _trusted_door_model(0.7, "cooling")
+    coord._door_factor_models = {"Master": model}
+    await coord._async_save_state()
+    payload = coord._store.saved
+
+    coord2, *_ = make_coordinator()
+
+    async def _load():
+        return payload
+
+    coord2._store.async_load = _load
+    await coord2.async_initialize()
+
+    assert "Master" in coord2._door_factor_models, "door_factor section was not loaded on init"
+    restored = coord2._door_factor_models["Master"]
+    assert restored.cooling.n == 6
+    assert restored.cooling.factor == pytest.approx(model.cooling.factor)
+    # A trusted cell still resolves to its learned factor after the round-trip.
+    assert resolve_door_factor(restored, "cooling") == pytest.approx(0.7)
+
+
+@pytest.mark.asyncio
+async def test_store_without_door_factor_section_resolves_to_default(make_coordinator):
+    """A pre-feature store (no ``door_factor``) loads to an empty map -> every room 0.9."""
+    coord, *_ = make_coordinator()
+
+    async def _load():
+        return {
+            "version": 2,
+            "vent_rates": {"v1": {"cooling": 0.02}},
+            "room_efficiency": {"Master": room_model_to_dict(new_room_model())},
+        }
+
+    coord._store.async_load = _load
+    await coord.async_initialize()
+
+    assert coord._door_factor_models == {}
+    # Any room with no learned model resolves to the legacy default exactly.
+    assert resolve_door_factor(coord._door_factor_models.get("Master"), "cooling") == pytest.approx(
+        DOOR_FACTOR_DEFAULT
+    )
+    assert resolve_door_factor(coord._door_factor_models.get("AnyRoom"), "heating") == pytest.approx(0.9)
+
+
+@pytest.mark.asyncio
+async def test_malformed_door_factor_section_dropped_without_losing_other_sections(make_coordinator):
+    """A malformed ``door_factor`` section must not crash init or wipe other sections."""
+    coord, *_ = make_coordinator()
+    room_model = new_room_model()
+    for _ in range(6):
+        update_room_efficiency(room_model, 0.02, 1, "cooling")
+
+    async def _load():
+        return {
+            "version": 2,
+            "door_factor": "not-a-dict",  # malformed section -> must be dropped
+            "room_efficiency": {"Master": room_model_to_dict(room_model)},  # valid -> survives
+            "vent_effectiveness": {
+                "v1": {"cooling": {"leak": 0.1, "n": 9, "curve": seed_linear_curve(0.1), "knee_pct": 100}}
+            },
+            "vent_rates": {"v1": {"cooling": 0.02}},
+        }
+
+    coord._store.async_load = _load
+    # Must not raise despite the malformed door_factor section.
+    await coord.async_initialize()
+
+    # The malformed section degrades to a safe empty map.
+    assert isinstance(coord._door_factor_models, dict)
+    assert coord._door_factor_models == {}
+    # Other sections are completely unaffected.
+    assert "Master" in coord._room_efficiency_models
+    assert coord._room_efficiency_models["Master"].cooling.baseline == pytest.approx(
+        room_model.cooling.baseline
+    )
+    assert coord._vent_effectiveness["v1"]["cooling"]["knee_pct"] == 100
+    assert coord._vent_rates == {"v1": {"cooling": 0.02}}
+
+
+@pytest.mark.asyncio
+async def test_load_door_factor_tolerates_garbled_entry_keeps_valid(make_coordinator):
+    """A garbled per-room entry decays to a fresh model; valid entries still load."""
+    coord, *_ = make_coordinator()
+    valid = _trusted_door_model(0.7, "cooling")
+
+    async def _load():
+        return {
+            "version": 2,
+            "door_factor": {
+                "Master": "nope",  # garbled entry -> tolerated as a fresh model (0.9)
+                "Guest": door_factor_to_dict(valid),  # valid trusted entry -> preserved
+            },
+            "vent_rates": {"v1": {"cooling": 0.02}},
+        }
+
+    coord._store.async_load = _load
+    await coord.async_initialize()
+
+    # Garbled entry resolves to the default; the valid trusted entry keeps its factor.
+    assert resolve_door_factor(coord._door_factor_models.get("Master"), "cooling") == pytest.approx(
+        DOOR_FACTOR_DEFAULT
+    )
+    assert resolve_door_factor(coord._door_factor_models.get("Guest"), "cooling") == pytest.approx(0.7)

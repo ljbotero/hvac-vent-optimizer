@@ -17,7 +17,12 @@ import sys
 
 import pytest
 
-_BALANCE_PATH = pathlib.Path(__file__).resolve().parent.parent / "custom_components" / "hvac_vent_optimizer" / "balance.py"
+_BALANCE_PATH = (
+    pathlib.Path(__file__).resolve().parent.parent
+    / "custom_components"
+    / "hvac_vent_optimizer"
+    / "balance.py"
+)
 _spec = importlib.util.spec_from_file_location("hvo_balance", _BALANCE_PATH)
 balance = importlib.util.module_from_spec(_spec)
 # Register before exec so dataclasses introspection (with `from __future__

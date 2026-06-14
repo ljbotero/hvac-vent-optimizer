@@ -208,6 +208,14 @@ class RoomScenario:
         current_open: initial commanded aperture (used as the movement baseline).
         curve: optional saturating flow curve (``breakpoints``/``flow``). When
             ``None`` a near-linear seed from ``leak`` is built at construction.
+        door_open_factor: optional injected *true* door-leakage ratio
+            ``rate_open / rate_closed`` for this room (R26.3). A leaky room
+            degrades a lot (ratio near/below the lower clamp); a tight interior
+            door barely degrades (ratio near 1.0). ``None`` ⇒ the room is not a
+            door-learning subject and :func:`learn_door_factors` ignores it.
+        door_open_samples: number of door-open observations to fold into the
+            room's door-factor cell. Fewer than :data:`learning.DOOR_MIN_N`
+            leaves the cell untrusted, so it resolves to the legacy ``0.9``.
     """
 
     room_id: str
@@ -219,6 +227,8 @@ class RoomScenario:
     vent_ids: tuple[str, ...] = ()
     current_open: float = 0.0
     curve: dict[str, Any] | None = None
+    door_open_factor: float | None = None
+    door_open_samples: int = 0
 
     def __post_init__(self) -> None:
         if not self.vent_ids:
@@ -607,6 +617,45 @@ def run(scenario: Scenario, strategy: str = "balance") -> RunResult:
         combined_open_history=combined_history,
         min_combined_open_pct=min_combined,
     )
+
+
+# ---------------------------------------------------------------------------
+# Per-room door-leakage learning (R26.1 / R26.3 / R27.4)
+# ---------------------------------------------------------------------------
+def learn_door_factors(scenario: Scenario, *, mode: str | None = None) -> dict[str, float]:
+    """Learn and resolve a per-room door-leakage factor for the ``doors_open`` case.
+
+    For every room that injects a ``door_open_factor`` (its *true* ratio
+    ``rate_open / rate_closed``), this folds ``door_open_samples`` door-open
+    observations into a fresh :class:`learning.DoorFactorModel` via the pure
+    :func:`learning.update_door_factor`, then resolves the bounded factor with
+    :func:`learning.resolve_door_factor`. The residual ratio is formed exactly as
+    the coordinator does it (``sample / reference``) from the room's door-closed
+    reference rate (its ``efficiency``) and the injected door-open sample rate, so
+    a non-positive reference is skipped (R28.4) and the EMA converges toward the
+    clamped injected ratio.
+
+    Rooms with no injected ``door_open_factor`` are not door-learning subjects and
+    are omitted from the result (R30.2). A room with fewer than
+    :data:`learning.DOOR_MIN_N` samples stays untrusted and resolves to the legacy
+    ``0.9`` default (R27.4). Every returned value lies in
+    ``[learning.DOOR_FACTOR_MIN, learning.DOOR_FACTOR_MAX]`` (R28.1). Pure and
+    deterministic — no RNG, no I/O.
+    """
+    resolve_mode = mode if mode is not None else scenario.mode
+    resolved: dict[str, float] = {}
+    for room in scenario.rooms:
+        if room.door_open_factor is None:
+            continue
+        model = learning.new_door_factor_model()
+        reference = room.efficiency  # door-closed reference rate (denominator)
+        for _ in range(max(0, room.door_open_samples)):
+            if reference <= 0.0:
+                break  # cannot form a ratio against a non-positive reference
+            sample = reference * room.door_open_factor  # injected door-open rate
+            learning.update_door_factor(model, sample / reference, resolve_mode)
+        resolved[room.room_id] = learning.resolve_door_factor(model, resolve_mode)
+    return resolved
 
 
 # ---------------------------------------------------------------------------

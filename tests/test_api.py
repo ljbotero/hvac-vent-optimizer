@@ -1,4 +1,5 @@
 """Fix #9: a 401/403 mid-request should trigger one token refresh + retry."""
+
 from __future__ import annotations
 
 import json
@@ -74,8 +75,8 @@ async def test_401_triggers_reauth_and_retry():
     api, session = _make_api([FakeResp(401), FakeResp(200, json_data={"ok": 2})])
     result = await api._async_request("GET", "/api/structures")
     assert result == {"ok": 2}
-    assert len(session.request_calls) == 2          # retried once
-    assert len(session.post_calls) == 2             # token refreshed after 401
+    assert len(session.request_calls) == 2  # retried once
+    assert len(session.post_calls) == 2  # token refreshed after 401
 
 
 @pytest.mark.asyncio
@@ -83,15 +84,17 @@ async def test_persistent_401_raises_after_one_retry():
     api, session = _make_api([FakeResp(401), FakeResp(403)])
     with pytest.raises(FlairApiAuthError):
         await api._async_request("GET", "/api/structures")
-    assert len(session.request_calls) == 2          # exactly one retry, no infinite loop
+    assert len(session.request_calls) == 2  # exactly one retry, no infinite loop
 
 
 @pytest.mark.asyncio
 async def test_429_still_retries_once():
-    api, session = _make_api([
-        FakeResp(429, headers={"Retry-After": "0"}),
-        FakeResp(200, json_data={"ok": 3}),
-    ])
+    api, session = _make_api(
+        [
+            FakeResp(429, headers={"Retry-After": "0"}),
+            FakeResp(200, json_data={"ok": 3}),
+        ]
+    )
     result = await api._async_request("GET", "/api/structures")
     assert result == {"ok": 3}
     assert len(session.request_calls) == 2

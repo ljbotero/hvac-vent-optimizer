@@ -27,6 +27,7 @@ through the Home Assistant fakes. The delayed finalize's 30 s ``asyncio.sleep``
 is gated so it never fires during the test, and ``_async_apply_dab_adjustments``
 is stubbed to a no-op so the tests isolate the cycle-anchor lifecycle.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -114,9 +115,7 @@ def _stub_apply(monkeypatch, coord):
 
 
 @pytest.mark.asyncio
-async def test_short_gap_reuses_prior_anchor_and_cancels_finalize(
-    make_coordinator, monkeypatch
-):
+async def test_short_gap_reuses_prior_anchor_and_cancels_finalize(make_coordinator, monkeypatch):
     """active -> idle -> active within < short_cycle_gap_min reuses the anchor."""
     coord, hass, _api, thermostat, vent_id, data = _setup(make_coordinator)
     _gate_sleep(monkeypatch)
@@ -181,9 +180,7 @@ async def test_long_gap_starts_fresh_cycle(make_coordinator, monkeypatch):
 @pytest.mark.asyncio
 async def test_short_cycle_disabled_when_gap_min_zero(make_coordinator, monkeypatch):
     """short_cycle_gap_min = 0 disables reuse: every reactivation is fresh."""
-    coord, hass, _api, thermostat, vent_id, data = _setup(
-        make_coordinator, short_cycle_gap_min=0
-    )
+    coord, hass, _api, thermostat, vent_id, data = _setup(make_coordinator, short_cycle_gap_min=0)
     _gate_sleep(monkeypatch)
     _stub_apply(monkeypatch, coord)
 
@@ -203,9 +200,7 @@ async def test_short_cycle_disabled_when_gap_min_zero(make_coordinator, monkeypa
 
 
 @pytest.mark.asyncio
-async def test_short_cycle_reuse_skipped_when_anchor_already_cleared(
-    make_coordinator, monkeypatch
-):
+async def test_short_cycle_reuse_skipped_when_anchor_already_cleared(make_coordinator, monkeypatch):
     """If finalize already cleared the anchor, a fresh cycle starts even on a
     short gap (nothing to reuse)."""
     coord, hass, _api, thermostat, vent_id, data = _setup(make_coordinator)

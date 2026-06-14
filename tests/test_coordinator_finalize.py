@@ -16,6 +16,7 @@ These tests drive the real ``_schedule_finalize`` code path and gate the inner
 ``asyncio.sleep`` so the delayed run can be interleaved deterministically with a
 re-activation, instead of waiting a real 30 s.
 """
+
 from __future__ import annotations
 
 import asyncio

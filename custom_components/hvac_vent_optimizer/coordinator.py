@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import math
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta, timezone
-import asyncio
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import aiohttp
+from homeassistant.components import logbook, persistent_notification
 from homeassistant.components.climate.const import HVACAction
-from homeassistant.components import persistent_notification, logbook
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import HomeAssistant, callback
@@ -30,102 +31,107 @@ from .balance import (
     apply_safety_floor,
     predicted_spread,
 )
+from .const import (
+    BRAND_FLAIR,
+    BRAND_MANUAL,
+    CONF_ADJUSTMENT_WINDOW_MINUTES,
+    CONF_AIRFLOW_LIMITED_ERROR_C,
+    CONF_AIRFLOW_LIMITED_MARGIN_PCT,
+    CONF_CLOSE_INACTIVE_ROOMS,
+    CONF_CONTROL_STRATEGY,
+    CONF_CONVENTIONAL_VENTS_BY_THERMOSTAT,
+    CONF_CROSSCOUPLING_ENABLED,
+    CONF_DAB_ENABLED,
+    CONF_DAB_FORCE_MANUAL,
+    CONF_DEADBAND_PERCENT,
+    CONF_DEVIATION_THRESHOLD,
+    CONF_DOOR_SENSOR_ENTITY,
+    CONF_INITIAL_EFFICIENCY_PERCENT,
+    CONF_LOG_EFFICIENCY_CHANGES,
+    CONF_MANUAL_VENTS,
+    CONF_MAX_ADJUSTMENT_BATCHES_PER_CYCLE,
+    CONF_MAX_ADJUSTMENT_BATCHES_PER_WINDOW,
+    CONF_MAX_RECALC_PER_CYCLE,
+    CONF_MIN_ADJUSTMENT_INTERVAL,
+    CONF_MIN_ADJUSTMENT_PERCENT,
+    CONF_NOTIFY_EFFICIENCY_CHANGES,
+    CONF_OUTDOOR_TEMP_ENTITY,
+    CONF_POLL_INTERVAL_ACTIVE,
+    CONF_POLL_INTERVAL_IDLE,
+    CONF_SAFETY_FLOOR_PCT,
+    CONF_SHORT_CYCLE_GAP_MIN,
+    CONF_SPREAD_GUARDRAIL_C,
+    CONF_SPREAD_IMPROVEMENT_DEADBAND_C,
+    CONF_STRUCTURE_ID,
+    CONF_TEMP_ERROR_OVERRIDE,
+    CONF_TEMP_SENSOR_ENTITY,
+    CONF_THERMOSTAT_ENTITY,
+    CONF_VENT_ASSIGNMENTS,
+    CONF_VENT_BRAND,
+    CONF_VENT_GRANULARITY,
+    CONTROL_STRATEGY_BALANCE,
+    DEFAULT_ADJUSTMENT_WINDOW_MINUTES,
+    DEFAULT_AIRFLOW_LIMITED_ERROR_C,
+    DEFAULT_AIRFLOW_LIMITED_MARGIN_PCT,
+    DEFAULT_CONTROL_STRATEGY,
+    DEFAULT_CROSSCOUPLING_ENABLED,
+    DEFAULT_DAB_FORCE_MANUAL,
+    DEFAULT_DEADBAND_PERCENT,
+    DEFAULT_DEVIATION_THRESHOLD,
+    DEFAULT_INITIAL_EFFICIENCY_PERCENT,
+    DEFAULT_LOG_EFFICIENCY_CHANGES,
+    DEFAULT_MAX_ADJUSTMENT_BATCHES_PER_CYCLE,
+    DEFAULT_MAX_ADJUSTMENT_BATCHES_PER_WINDOW,
+    DEFAULT_MAX_RECALC_PER_CYCLE,
+    DEFAULT_MIN_ADJUSTMENT_INTERVAL,
+    DEFAULT_MIN_ADJUSTMENT_PERCENT,
+    DEFAULT_NOTIFY_EFFICIENCY_CHANGES,
+    DEFAULT_POLL_INTERVAL_ACTIVE,
+    DEFAULT_POLL_INTERVAL_IDLE,
+    DEFAULT_SAFETY_FLOOR_PCT,
+    DEFAULT_SHORT_CYCLE_GAP_MIN,
+    DEFAULT_SPREAD_GUARDRAIL_C,
+    DEFAULT_SPREAD_IMPROVEMENT_DEADBAND_C,
+    DEFAULT_TEMP_ERROR_OVERRIDE,
+    DOMAIN,
+)
 from .context import (
     Context,
     apply_context_multipliers,
     build as build_context,
     regime_index as context_regime_index,
 )
-from .learning import (
-    LEAK_DEFAULT,
-    RoomEfficiencyModel,
-    VentCurve,
-    derive_effectiveness,
-    effective_rate as learning_effective_rate,
-    new_room_model,
-    room_model_from_dict,
-    room_model_to_dict,
-    seed_room_model_from_v1,
-    seed_vent_effectiveness,
-    update_room_efficiency,
-)
-from .const import (
-    BRAND_FLAIR,
-    BRAND_MANUAL,
-    CONTROL_STRATEGY_BALANCE,
-    CONF_MANUAL_VENTS,
-    CONF_VENT_BRAND,
-    CONF_CLOSE_INACTIVE_ROOMS,
-    CONF_CONVENTIONAL_VENTS_BY_THERMOSTAT,
-    CONF_DAB_ENABLED,
-    CONF_DAB_FORCE_MANUAL,
-    CONF_DEADBAND_PERCENT,
-    CONF_DEVIATION_THRESHOLD,
-    CONF_DOOR_SENSOR_ENTITY,
-    CONF_OUTDOOR_TEMP_ENTITY,
-    CONF_INITIAL_EFFICIENCY_PERCENT,
-    CONF_NOTIFY_EFFICIENCY_CHANGES,
-    CONF_LOG_EFFICIENCY_CHANGES,
-    CONF_CONTROL_STRATEGY,
-    CONF_CROSSCOUPLING_ENABLED,
-    CONF_SAFETY_FLOOR_PCT,
-    CONF_SPREAD_GUARDRAIL_C,
-    CONF_SPREAD_IMPROVEMENT_DEADBAND_C,
-    CONF_AIRFLOW_LIMITED_MARGIN_PCT,
-    CONF_AIRFLOW_LIMITED_ERROR_C,
-    CONF_MAX_RECALC_PER_CYCLE,
-    CONF_MAX_ADJUSTMENT_BATCHES_PER_CYCLE,
-    CONF_MAX_ADJUSTMENT_BATCHES_PER_WINDOW,
-    CONF_ADJUSTMENT_WINDOW_MINUTES,
-    CONF_SHORT_CYCLE_GAP_MIN,
-    CONF_MIN_ADJUSTMENT_PERCENT,
-    CONF_MIN_ADJUSTMENT_INTERVAL,
-    CONF_TEMP_ERROR_OVERRIDE,
-    CONF_POLL_INTERVAL_ACTIVE,
-    CONF_POLL_INTERVAL_IDLE,
-    CONF_STRUCTURE_ID,
-    CONF_VENT_ASSIGNMENTS,
-    CONF_THERMOSTAT_ENTITY,
-    CONF_TEMP_SENSOR_ENTITY,
-    CONF_VENT_GRANULARITY,
-    DEFAULT_DEADBAND_PERCENT,
-    DEFAULT_DEVIATION_THRESHOLD,
-    DEFAULT_MAX_RECALC_PER_CYCLE,
-    DEFAULT_POLL_INTERVAL_ACTIVE,
-    DEFAULT_POLL_INTERVAL_IDLE,
-    DEFAULT_DAB_FORCE_MANUAL,
-    DEFAULT_INITIAL_EFFICIENCY_PERCENT,
-    DEFAULT_NOTIFY_EFFICIENCY_CHANGES,
-    DEFAULT_LOG_EFFICIENCY_CHANGES,
-    DEFAULT_CONTROL_STRATEGY,
-    DEFAULT_CROSSCOUPLING_ENABLED,
-    DEFAULT_SAFETY_FLOOR_PCT,
-    DEFAULT_SPREAD_GUARDRAIL_C,
-    DEFAULT_SPREAD_IMPROVEMENT_DEADBAND_C,
-    DEFAULT_AIRFLOW_LIMITED_MARGIN_PCT,
-    DEFAULT_AIRFLOW_LIMITED_ERROR_C,
-    DEFAULT_MAX_ADJUSTMENT_BATCHES_PER_CYCLE,
-    DEFAULT_MAX_ADJUSTMENT_BATCHES_PER_WINDOW,
-    DEFAULT_ADJUSTMENT_WINDOW_MINUTES,
-    DEFAULT_SHORT_CYCLE_GAP_MIN,
-    DEFAULT_MIN_ADJUSTMENT_PERCENT,
-    DEFAULT_MIN_ADJUSTMENT_INTERVAL,
-    DEFAULT_TEMP_ERROR_OVERRIDE,
-    DOMAIN,
-)
 from .dab import (
     DEFAULT_SETTINGS,
     adjust_for_minimum_airflow,
+    calculate_hvac_mode,
     calculate_longest_minutes_to_target,
     calculate_open_percentage_for_all_vents,
-    calculate_hvac_mode,
-    calculate_room_change_rate,
-    calculate_vent_open_percentage,
     has_room_reached_setpoint,
     rolling_average,
     round_big_decimal,
     round_to_nearest_multiple,
     should_pre_adjust,
+)
+from .learning import (
+    DOOR_MIN_N,
+    LEAK_DEFAULT,
+    DoorFactorModel,
+    RoomEfficiencyModel,
+    VentCurve,
+    derive_effectiveness,
+    door_factor_from_dict,
+    door_factor_to_dict,
+    effective_rate as learning_effective_rate,
+    new_door_factor_model,
+    new_room_model,
+    resolve_door_factor,
+    room_model_from_dict,
+    room_model_to_dict,
+    seed_room_model_from_v1,
+    seed_vent_effectiveness,
+    update_door_factor,
+    update_room_efficiency,
 )
 from .utils import get_remote_sensor_id, is_fahrenheit_unit
 
@@ -216,9 +222,9 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def __init__(self, hass: HomeAssistant, api: FlairApi | None, entry: ConfigEntry) -> None:
         self.api = api
         self.entry = entry
-        self._unsub_thermostat_listeners: list[callable] = []
+        self._unsub_thermostat_listeners: list[Callable[[], None]] = []
         self._dab_state: dict[str, dict[str, Any]] = {}
-        self._last_hvac_action: dict[str, str] = {}
+        self._last_hvac_action: dict[str, str | None] = {}
         self._vent_rates: dict[str, dict[str, float]] = {}
         self._vent_last_reading: dict[str, datetime] = {}
         self._vent_last_commanded: dict[str, datetime] = {}
@@ -230,6 +236,11 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Kept in-memory for now; Task 22 wires the schema-v2 persistence store
         # around this dict (clean seam — load seeds it, save reads from it).
         self._room_efficiency_models: dict[str, RoomEfficiencyModel] = {}
+        # Per-room door-leakage residual models (R26.4), keyed identically to the
+        # room-efficiency store: by room name, falling back to the vent id when a
+        # room is unnamed. In-memory only for now; Tasks 7/8 wire the learning
+        # writes and read-time resolution, Task 9 the schema-v2 persistence.
+        self._door_factor_models: dict[str, DoorFactorModel] = {}
         # Per-vent aperture->airflow effectiveness, schema-v2 ``vent_effectiveness``
         # section (R25.2/25.3): ``{vent: {mode: {leak, n, curve{breakpoints,flow,
         # counts}, knee_pct, sum_*}}}``. Seeded from the regression at migration
@@ -334,6 +345,12 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         self._room_efficiency_models = self._load_room_efficiency(_safe_dict(stored.get("room_efficiency")))
 
+        # Additive ``door_factor`` section (R29.3/R29.4). A missing/malformed
+        # section degrades to an empty map (every room resolves to the 0.9
+        # default) without touching the room_efficiency/vent_effectiveness
+        # sections; no STORE_SCHEMA_VERSION bump is required.
+        self._door_factor_models = self._load_door_factor(_safe_dict(stored.get("door_factor")))
+
         # Restore hold/deviation counters
         self._hold_count = int(stored.get("hold_count", 0) or 0)
         self._recalc_count_24h = int(stored.get("recalc_count_24h", 0) or 0)
@@ -376,14 +393,17 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._migrate_state_to_v2()
 
     def _migrate_symmetric_offsets(self) -> None:
-        """Fix existing efficiency models with identical (symmetric) offsets and expand to current regime count."""
+        """Fix existing efficiency models with identical (symmetric) offsets.
+
+        Also expands stored models to the current regime count.
+        """
         migrated = 0
         expanded = 0
-        for vent_id, modes in self._efficiency_models.items():
-            for mode, model in modes.items():
+        for _vent_id, modes in self._efficiency_models.items():
+            for _mode, model in modes.items():
                 offsets = model.get("offsets", [])
                 # Fix symmetric offsets
-                if len(offsets) >= 2 and len(set(round(o, 10) for o in offsets)) == 1:
+                if len(offsets) >= 2 and len({round(o, 10) for o in offsets}) == 1:
                     baseline = model.get("baseline", 0.0)
                     spread = max(0.025, abs(baseline) * 0.15) if baseline else 0.025
                     model["offsets"] = [
@@ -468,6 +488,27 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _LOGGER.warning("Skipping malformed room_efficiency entry for %r", room)
         return models
 
+    @staticmethod
+    def _load_door_factor(data: Any) -> dict[str, DoorFactorModel]:
+        """Deserialize the ``door_factor`` section to DoorFactorModels (R29.3/R29.4).
+
+        Mirrors :meth:`_load_room_efficiency`: a non-dict/missing section yields an
+        empty map (every room then resolves to the ``0.9`` default), and each
+        per-room entry is decoded via the pure :func:`learning.door_factor_from_dict`,
+        which tolerates malformed/partial input (it becomes a fresh model) so a
+        garbled entry never raises or drops the others — and never affects the
+        ``room_efficiency``/``vent_effectiveness`` sections.
+        """
+        models: dict[str, DoorFactorModel] = {}
+        if not isinstance(data, dict):
+            return models
+        for room, raw in data.items():
+            try:
+                models[str(room)] = door_factor_from_dict(raw)
+            except Exception:  # noqa: BLE001 - never lose the rest of the store
+                _LOGGER.warning("Skipping malformed door_factor entry for %r", room)
+        return models
+
     def _migrate_state_to_v2(self) -> None:
         """Idempotently bring loaded state up to schema v2 (R18.3/R25.7/R13.5).
 
@@ -487,9 +528,9 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         vent_ids = set(self._vent_models) | set(self._vent_rates) | set(self._efficiency_models)
         seeded = 0
         for vent_id in vent_ids:
-            modes = set((self._vent_models.get(vent_id) or {}))
-            modes |= set((self._vent_rates.get(vent_id) or {}))
-            modes |= set((self._efficiency_models.get(vent_id) or {}))
+            modes = set(self._vent_models.get(vent_id) or {})
+            modes |= set(self._vent_rates.get(vent_id) or {})
+            modes |= set(self._efficiency_models.get(vent_id) or {})
             for mode in modes:
                 if mode not in {"cooling", "heating"}:
                     continue
@@ -587,7 +628,7 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if not climate_state:
                 continue
             hvac_action = self._resolve_hvac_action(climate_state)
-            if hvac_action not in {HVACAction.COOLING, HVACAction.HEATING}:
+            if hvac_action is None or hvac_action not in {HVACAction.COOLING, HVACAction.HEATING}:
                 # HVAC not active — clean up any stale persisted cycle targets
                 self._cycle_targets.pop(thermostat_entity, None)
                 continue
@@ -611,7 +652,7 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
                 # Also ensure dab_state exists for the running cycle
                 if thermostat_entity not in self._dab_state:
-                    now = datetime.now(timezone.utc)
+                    now = datetime.now(UTC)
                     self._dab_state[thermostat_entity] = {
                         "mode": hvac_action,
                         "started_cycle": self._cycle_targets[thermostat_entity].get("cycle_start", now),
@@ -692,7 +733,7 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 raise UpdateFailed("Flair API client not initialized")
             vents = await self.api.async_get_vents(structure_id)
             pucks = await self.api.async_get_pucks(structure_id)
-        except Exception as err:  # noqa: BLE001 - surface errors to HA
+        except Exception as err:
             self._async_notify_error("Flair update failed", str(err))
             raise UpdateFailed(f"Error fetching Flair data: {err}") from err
 
@@ -708,7 +749,7 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self.entry.options.get(CONF_DAB_ENABLED, False):
             try:
                 await self._async_process_dab(data)
-            except Exception as err:  # noqa: BLE001
+            except Exception as err:
                 _LOGGER.exception("DAB processing failed: %s", err)
                 self._async_notify_error("DAB processing failed", str(err))
 
@@ -718,7 +759,7 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _async_update_manual_data(self) -> dict[str, Any]:
         manual_vents = self._get_manual_vents()
         vents: list[dict[str, Any]] = []
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         for vent in manual_vents:
             vent_id = vent.get("id")
@@ -768,7 +809,7 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self.entry.options.get(CONF_DAB_ENABLED, False):
             try:
                 await self._async_process_dab(data)
-            except Exception as err:  # noqa: BLE001
+            except Exception as err:
                 _LOGGER.exception("DAB processing failed: %s", err)
                 self._async_notify_error("DAB processing failed", str(err))
 
@@ -821,19 +862,22 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         vents: list[dict[str, Any]],
         remote_cache: dict[str, asyncio.Task | Any],
     ) -> list[dict[str, Any]]:
+        api = self.api
+        if api is None:
+            return vents
         semaphore = asyncio.Semaphore(6)
 
         async def enrich(vent: dict[str, Any]) -> dict[str, Any]:
             async with semaphore:
                 vent_id = vent["id"]
                 try:
-                    reading = await self.api.async_get_vent_reading(vent_id)
-                    self._vent_last_reading[vent_id] = datetime.now(timezone.utc)
+                    reading = await api.async_get_vent_reading(vent_id)
+                    self._vent_last_reading[vent_id] = datetime.now(UTC)
                 except Exception as err:  # noqa: BLE001
                     _LOGGER.warning("Failed to fetch vent reading for %s: %s", vent_id, err)
                     reading = {}
                 try:
-                    room = await self.api.async_get_vent_room(vent_id)
+                    room = await api.async_get_vent_room(vent_id)
                 except Exception as err:  # noqa: BLE001
                     _LOGGER.warning("Failed to fetch vent room for %s: %s", vent_id, err)
                     room = {}
@@ -852,18 +896,21 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         pucks: list[dict[str, Any]],
         remote_cache: dict[str, asyncio.Task | Any],
     ) -> list[dict[str, Any]]:
+        api = self.api
+        if api is None:
+            return pucks
         semaphore = asyncio.Semaphore(6)
 
         async def enrich(puck: dict[str, Any]) -> dict[str, Any]:
             async with semaphore:
                 puck_id = puck["id"]
                 try:
-                    reading = await self.api.async_get_puck_reading(puck_id)
+                    reading = await api.async_get_puck_reading(puck_id)
                 except Exception as err:  # noqa: BLE001
                     _LOGGER.warning("Failed to fetch puck reading for %s: %s", puck_id, err)
                     reading = {}
                 try:
-                    room = await self.api.async_get_puck_room(puck_id)
+                    room = await api.async_get_puck_room(puck_id)
                 except Exception as err:  # noqa: BLE001
                     _LOGGER.warning("Failed to fetch puck room for %s: %s", puck_id, err)
                     room = {}
@@ -902,8 +949,11 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return room
 
     async def _async_get_remote_occupied(self, remote_id: str) -> Any:
+        api = self.api
+        if api is None:
+            return None
         try:
-            reading = await self.api.async_get_remote_sensor_reading(remote_id)
+            reading = await api.async_get_remote_sensor_reading(remote_id)
         except Exception:  # noqa: BLE001
             return None
         return reading.get("occupied")
@@ -911,9 +961,7 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _get_thermostat_entities(self) -> list[str]:
         assignments = self._get_vent_assignments()
         entities = {
-            data.get(CONF_THERMOSTAT_ENTITY)
-            for data in assignments.values()
-            if data.get(CONF_THERMOSTAT_ENTITY)
+            thermostat for data in assignments.values() if (thermostat := data.get(CONF_THERMOSTAT_ENTITY))
         }
         return sorted(entities)
 
@@ -1064,7 +1112,7 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         metrics["last_temp_error"] = temp_error
         metrics["last_adjustments"] = adjustments
         metrics["last_movement"] = movement
-        metrics["last_updated"] = datetime.now(timezone.utc).isoformat()
+        metrics["last_updated"] = datetime.now(UTC).isoformat()
         if active_temp_error is not None:
             active_cycles = metrics.get("active_cycles", 0) + 1
             metrics["active_cycles"] = active_cycles
@@ -1135,7 +1183,7 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
 
         # Track when thermostat entered idle
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         if entity_id not in self._idle_since:
             self._idle_since[entity_id] = now
 
@@ -1297,7 +1345,7 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
                 continue
             hvac_action = self._resolve_hvac_action(state)
-            if hvac_action not in {HVACAction.COOLING, HVACAction.HEATING}:
+            if hvac_action is None or hvac_action not in {HVACAction.COOLING, HVACAction.HEATING}:
                 _LOGGER.debug("Thermostat %s not actively heating/cooling", thermo)
                 continue
 
@@ -1329,7 +1377,7 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         now = datetime.now(UTC)
         active_states = {HVACAction.COOLING, HVACAction.HEATING}
 
-        if hvac_action in active_states and prev_action not in active_states:
+        if hvac_action is not None and hvac_action in active_states and prev_action not in active_states:
             # idle/none -> active. If the thermostat just short-cycled (idle gap
             # shorter than ``short_cycle_gap_min``) and the prior cycle's anchor
             # is still intact, reuse it instead of recomputing from scratch
@@ -1346,7 +1394,7 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._start_hvac_cycle(thermostat_entity, hvac_action, vent_ids, data)
             self._cycle_idle_since.pop(thermostat_entity, None)
 
-        if hvac_action not in active_states and prev_action in active_states:
+        if hvac_action not in active_states and prev_action is not None and prev_action in active_states:
             # active -> idle. Remember when we went idle so the next
             # re-activation can measure the gap, then schedule the delayed
             # finalize (which would otherwise clear the anchor).
@@ -1355,7 +1403,7 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         self._last_hvac_action[thermostat_entity] = hvac_action
 
-        if hvac_action in active_states:
+        if hvac_action is not None and hvac_action in active_states:
             await self._async_apply_dab_adjustments(
                 thermostat_entity, hvac_action, vent_ids, data, count_as_poll=True
             )
@@ -1396,7 +1444,7 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _start_hvac_cycle(
         self, thermostat_entity: str, hvac_action: str, vent_ids: list[str], data: dict[str, Any]
     ) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         self._dab_state[thermostat_entity] = {
             "mode": hvac_action,
             "started_cycle": now,
@@ -1482,14 +1530,12 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not state:
             return
 
-        started_cycle = state.get("started_cycle")
         started_running = state.get("started_running")
         if not started_running:
             return
 
-        finished_running = datetime.now(timezone.utc)
+        finished_running = datetime.now(UTC)
         total_running_minutes = max(0.0, (finished_running - started_running).total_seconds() / 60.0)
-        total_cycle_minutes = max(0.0, (finished_running - started_cycle).total_seconds() / 60.0)
 
         prev_max = self._max_running_minutes.get(thermostat_entity, DEFAULT_SETTINGS.max_minutes_to_setpoint)
         self._max_running_minutes[thermostat_entity] = rolling_average(prev_max, total_running_minutes, 1, 6)
@@ -1514,7 +1560,7 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
             current_rate = self._vent_rates.get(vent_id, {}).get(rate_prop, 0.0)
             vent_context = self._get_vent_context(vent_id, self.data) if self.data else None
-            baseline_rate, effective_rate, confidence = self._update_efficiency_model(
+            baseline_rate, effective_rate, _confidence = self._update_efficiency_model(
                 vent_id, rate_prop, efficiency_sample, context=vent_context
             )
             # Fold the same observed full-open rate sample into the regime-aware
@@ -1659,7 +1705,7 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._hold_count,
         )
         if cycle_data and cycle_data.get("targets"):
-            now_check = datetime.now(timezone.utc)
+            now_check = datetime.now(UTC)
             elapsed_min = (now_check - cycle_data["cycle_start"]).total_seconds() / 60.0
 
             # Skip deviation check for first 5 minutes of a cycle
@@ -1823,7 +1869,7 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         # Normalize targets within multi-vent room groups
         room_groups = self._build_room_vent_groups(list(targets.keys()), data)
-        for room_name, group_vent_ids in room_groups.items():
+        for _room_name, group_vent_ids in room_groups.items():
             if len(group_vent_ids) <= 1:
                 continue
             # Use the first vent's target for the whole group
@@ -1905,22 +1951,22 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     )
                     return
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         changed = 0
         movement_total = 0.0
         target_rounded_values: dict[str, int] = {}
 
         # Build group-level anti-chatter lookup: vent_id → max last_commanded across its room group
         group_last_commanded: dict[str, datetime] = {}
-        for room_name, group_vent_ids in room_groups.items():
+        for _room_name, group_vent_ids in room_groups.items():
             if len(group_vent_ids) <= 1:
                 continue
             group_max = max(
                 (
-                    self._vent_last_commanded.get(vid, datetime.min.replace(tzinfo=timezone.utc))
+                    self._vent_last_commanded.get(vid, datetime.min.replace(tzinfo=UTC))
                     for vid in group_vent_ids
                 ),
-                default=datetime.min.replace(tzinfo=timezone.utc),
+                default=datetime.min.replace(tzinfo=UTC),
             )
             for vid in group_vent_ids:
                 group_last_commanded[vid] = group_max
@@ -1982,7 +2028,7 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # group and applied identically to every member; a single shared cooldown
         # clock is stamped onto all of the group's vents (R7.4/R23.2). Groups of
         # one collapse to the original per-vent behavior.
-        for room_name, group_vent_ids in room_groups.items():
+        for _room_name, group_vent_ids in room_groups.items():
             gids = [v for v in group_vent_ids if v in targets]
             if not gids:
                 continue
@@ -2169,7 +2215,7 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self.api:
             try:
                 await self.api.async_set_vent_position(vent_id, target_rounded)
-            except (asyncio.TimeoutError, aiohttp.ClientError, FlairApiError) as err:
+            except (TimeoutError, aiohttp.ClientError, FlairApiError) as err:
                 _LOGGER.warning(
                     "Failed to set vent %s to %s%%: %s",
                     vent_id,
@@ -2215,7 +2261,7 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         cost_targets: dict[str, float] = {}
         stats_targets: dict[str, float] = {}
         if longest_time == 0:
-            dab_targets = {vent_id: 100.0 for vent_id in rate_and_temp}
+            dab_targets = dict.fromkeys(rate_and_temp, 100.0)
         else:
             dab_targets = calculate_open_percentage_for_all_vents(
                 rate_and_temp, hvac_action, setpoint, longest_time, True, DEFAULT_SETTINGS
@@ -2382,15 +2428,9 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         opts = self.entry.options
         return AllocSettings(
             granularity=int(granularity),
-            safety_floor_pct=self._opt_float(
-                CONF_SAFETY_FLOOR_PCT, DEFAULT_SAFETY_FLOOR_PCT
-            ),
-            crosscoupling=bool(
-                opts.get(CONF_CROSSCOUPLING_ENABLED, DEFAULT_CROSSCOUPLING_ENABLED)
-            ),
-            spread_guardrail_c=self._opt_float(
-                CONF_SPREAD_GUARDRAIL_C, DEFAULT_SPREAD_GUARDRAIL_C
-            ),
+            safety_floor_pct=self._opt_float(CONF_SAFETY_FLOOR_PCT, DEFAULT_SAFETY_FLOOR_PCT),
+            crosscoupling=bool(opts.get(CONF_CROSSCOUPLING_ENABLED, DEFAULT_CROSSCOUPLING_ENABLED)),
+            spread_guardrail_c=self._opt_float(CONF_SPREAD_GUARDRAIL_C, DEFAULT_SPREAD_GUARDRAIL_C),
             spread_improvement_deadband_c=self._opt_float(
                 CONF_SPREAD_IMPROVEMENT_DEADBAND_C,
                 DEFAULT_SPREAD_IMPROVEMENT_DEADBAND_C,
@@ -2517,7 +2557,7 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         try:
             settings = self._balance_gate_settings(granularity)
-        except Exception:  # defensive at the apply boundary
+        except Exception:  # noqa: BLE001 - defensive at the apply boundary
             settings = AllocSettings()
         margin = settings.airflow_limited_margin_pct
         error_c = settings.airflow_limited_error_c
@@ -2537,9 +2577,7 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 temp = self._get_room_temp(rep, data)
                 if temp is None:
                     continue
-                signed = (
-                    (float(temp) - setpoint) if cooling else (setpoint - float(temp))
-                )
+                signed = (float(temp) - setpoint) if cooling else (setpoint - float(temp))
                 room = self._get_room_data(rep, data)
                 room_id = room.get("id") or room_name
                 signed_errors[room_id] = round(signed, 2)
@@ -2550,7 +2588,7 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if current_open >= 100.0 - margin and signed > error_c:
                     airflow_rooms.add(room_id)
                     airflow_vents.update(group_vent_ids)
-            except Exception:  # skip the room, never crash (R22.3)
+            except Exception:  # noqa: BLE001 - skip the room, never crash (R22.3)
                 continue
 
         spread = (max(temps) - min(temps)) if len(temps) >= 2 else 0.0
@@ -2562,24 +2600,18 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._airflow_limited_vents = airflow_vents
         self._record_spread_metrics(control_strategy, spread, settings.spread_guardrail_c)
 
-    def _record_spread_metrics(
-        self, strategy: str, spread: float, guardrail_c: float
-    ) -> None:
+    def _record_spread_metrics(self, strategy: str, spread: float, guardrail_c: float) -> None:
         """Accumulate per-strategy spread metrics each active poll (R13.4)."""
         metrics = self._strategy_metrics.setdefault(strategy, {})
         for field, default in _NEW_METRIC_DEFAULTS.items():
             metrics.setdefault(field, default)
         n = self._spread_sample_counts.get(strategy, 0) + 1
         self._spread_sample_counts[strategy] = n
-        metrics["avg_spread"] = (
-            float(metrics.get("avg_spread", 0.0)) * (n - 1) + spread
-        ) / n
+        metrics["avg_spread"] = (float(metrics.get("avg_spread", 0.0)) * (n - 1) + spread) / n
         metrics["max_spread"] = max(float(metrics.get("max_spread", 0.0)), spread)
         if spread > guardrail_c:
             interval_min = float(
-                self.entry.options.get(
-                    CONF_POLL_INTERVAL_ACTIVE, DEFAULT_POLL_INTERVAL_ACTIVE
-                )
+                self.entry.options.get(CONF_POLL_INTERVAL_ACTIVE, DEFAULT_POLL_INTERVAL_ACTIVE)
             )
             metrics["time_above_guardrail_min"] = (
                 float(metrics.get("time_above_guardrail_min", 0.0)) + interval_min
@@ -2735,17 +2767,13 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.entry.options.get(CONF_CONVENTIONAL_VENTS_BY_THERMOSTAT, {}).get(thermostat_entity, 0) or 0
         )
         settings = AllocSettings(
-            safety_floor_pct=self._opt_float(
-                CONF_SAFETY_FLOOR_PCT, DEFAULT_SAFETY_FLOOR_PCT
-            ),
+            safety_floor_pct=self._opt_float(CONF_SAFETY_FLOOR_PCT, DEFAULT_SAFETY_FLOOR_PCT),
             conventional_vents=conventional,
             inactive_open_pct_sum=inactive_open_sum,
             inactive_count=len(inactive_vents),
             granularity=int(granularity),
             crosscoupling=bool(
-                self.entry.options.get(
-                    CONF_CROSSCOUPLING_ENABLED, DEFAULT_CROSSCOUPLING_ENABLED
-                )
+                self.entry.options.get(CONF_CROSSCOUPLING_ENABLED, DEFAULT_CROSSCOUPLING_ENABLED)
             ),
             airflow_limited_margin_pct=self._opt_float(
                 CONF_AIRFLOW_LIMITED_MARGIN_PCT, DEFAULT_AIRFLOW_LIMITED_MARGIN_PCT
@@ -2978,34 +3006,70 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         mode = "cooling" if hvac_action == HVACAction.COOLING else "heating"
         ctx = self._build_context(vent_id, data)
         room_name = self._get_room_name(vent_id, data)
-        model = self._room_efficiency_models.get(room_name) if room_name else None
+        room_key = room_name or vent_id
+        model = self._room_efficiency_models.get(room_key) if room_name else None
         if model is not None:
             learned = learning_effective_rate(model, context_regime_index(ctx), mode)
             if learned > 0:
-                return apply_context_multipliers(learned, ctx, mode)
+                # A7 "Apply": resolve the learned per-room door factor (door-open
+                # only; neutral 0.9 when the model is None/cold) and thread it
+                # into the bounded context multipliers (R26.1/26.5/27.4).
+                df = resolve_door_factor(self._door_factor_models.get(room_key), mode)
+                return apply_context_multipliers(learned, ctx, mode, door_factor=df)
         # Fallback: legacy regime/offset model (unchanged behavior).
         legacy_context = self._get_vent_context(vent_id, data)
         return self._get_effective_efficiency_rate(vent_id, hvac_action, context=legacy_context)
 
     def _update_room_efficiency_model(self, vent_id: str, mode: str, sample: float) -> None:
-        """Fold one observed full-open rate ``sample`` into the room model (R25).
+        """Route one observed full-open rate ``sample`` per door state (R25/A7).
 
-        Builds the current :class:`context.Context`, derives its ``regime_index``
-        and folds the sample into the room's :class:`learning.RoomEfficiencyModel`
-        for ``mode`` (cooling/heating) via the pure
-        :func:`learning.update_room_efficiency` (adaptive-alpha EMA on the
-        baseline + the selected regime cell). The model is created on first use.
+        Builds the current :class:`context.Context` and derives its
+        ``regime_index``. The learning write is then split on ``ctx.doors_open``
+        (D11):
+
+        * **Door open** — the sample is a *full-open while open* observation. The
+          door-closed reference ``ref = effective_rate(room_model, regime, mode)``
+          is read *before* the sample is incorporated. WHEN ``ref > 0`` the
+          residual ratio ``sample / ref`` is folded into the room's
+          :class:`learning.DoorFactorModel` for ``mode`` via
+          :func:`learning.update_door_factor` (created on first use), and the
+          :class:`learning.RoomEfficiencyModel` is left untouched so the
+          reference stays door-closed-clean (R29.1, removing the latent
+          double-count). WHEN ``ref <= 0`` no ratio can be formed, so neither
+          learner is updated (R28.4).
+        * **Door closed / unknown** (``False``/``None``) — the sample is folded
+          into the room model via :func:`learning.update_room_efficiency`
+          exactly as before; the door learner is untouched (R29.2).
+
         Keyed by room name so a multi-vent room learns at the group level; falls
         back to the vent id when the room is unnamed.
         """
         data = self.data or {}
         room_key = self._get_room_name(vent_id, data) or vent_id
         ctx = self._build_context(vent_id, data)
+        regime = context_regime_index(ctx)
+
+        if ctx.doors_open is True:
+            # D11/R29.1: door-open samples train the door-factor learner against
+            # the door-closed reference and never mutate the room model.
+            room_model = self._room_efficiency_models.get(room_key)
+            ref = learning_effective_rate(room_model, regime, mode) if room_model is not None else 0.0
+            if ref <= 0:
+                # R28.4: no positive reference -> no ratio -> skip both learners.
+                return
+            door_model = self._door_factor_models.get(room_key)
+            if door_model is None:
+                door_model = new_door_factor_model()
+                self._door_factor_models[room_key] = door_model
+            update_door_factor(door_model, sample / ref, mode)
+            return
+
+        # R29.2: door-closed/door-unknown -> fold into the room model as today.
         model = self._room_efficiency_models.get(room_key)
         if model is None:
             model = new_room_model()
             self._room_efficiency_models[room_key] = model
-        update_room_efficiency(model, sample, context_regime_index(ctx), mode)
+        update_room_efficiency(model, sample, regime, mode)
 
     def _record_cycle_sample(self, thermostat_entity: str, vent_id: str, data: dict[str, Any]) -> None:
         dab_state = getattr(self, "_dab_state", {})
@@ -3021,7 +3085,7 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         duct_temp = self._get_vent_duct_temp(vent_id, data)
         samples.append(
             {
-                "t": datetime.now(timezone.utc),
+                "t": datetime.now(UTC),
                 "temp": float(temp),
                 "aperture": float(aperture),
                 "duct": duct_temp,
@@ -3088,7 +3152,7 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         sum_x = sum(xs)
         sum_y = sum(ys)
         sum_xx = sum(x * x for x in xs)
-        sum_xy = sum(x * y for x, y in zip(xs, ys))
+        sum_xy = sum(x * y for x, y in zip(xs, ys, strict=False))
         denom = (n * sum_xx) - (sum_x * sum_x)
         if denom == 0:
             return None
@@ -3130,11 +3194,11 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if rate_room is None:
             return None, None, None
 
-        duct_values = [sample.get("duct") for sample in windowed if sample.get("duct") is not None]
+        duct_values = [float(d) for sample in windowed if (d := sample.get("duct")) is not None]
         rate_norm = rate_room
         if duct_values:
-            mean_duct = sum(float(v) for v in duct_values) / len(duct_values)
-            variance = sum((float(v) - mean_duct) ** 2 for v in duct_values) / len(duct_values)
+            mean_duct = sum(duct_values) / len(duct_values)
+            variance = sum((v - mean_duct) ** 2 for v in duct_values) / len(duct_values)
             stability = variance**0.5
             if stability <= EFF_DUCT_STABILITY_C:
                 deltas = [
@@ -3147,10 +3211,7 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     rate_norm = rate_room / mean_room_delta
 
         rate_eff = rate_norm / (mean_aperture / 100.0)
-        if hvac_action == HVACAction.HEATING:
-            efficiency = max(0.0, rate_eff)
-        else:
-            efficiency = max(0.0, -rate_eff)
+        efficiency = max(0.0, rate_eff) if hvac_action == HVACAction.HEATING else max(0.0, -rate_eff)
         if efficiency <= 0:
             return None, None, None
         observed_rate = abs(rate_room)
@@ -3324,7 +3385,7 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def build_efficiency_export(self) -> dict[str, Any]:
         """Build a Hubitat-compatible efficiency export payload."""
-        export_date = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        export_date = datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
         structure_id = self.entry.data.get(CONF_STRUCTURE_ID)
         room_efficiencies: list[dict[str, Any]] = []
 
@@ -3361,6 +3422,10 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "room_efficiency": {
                 room: room_model_to_dict(model)
                 for room, model in getattr(self, "_room_efficiency_models", {}).items()
+            },
+            "door_factor": {
+                room: door_factor_to_dict(model)
+                for room, model in getattr(self, "_door_factor_models", {}).items()
             },
         }
 
@@ -3425,6 +3490,9 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         imported_re = payload.get("room_efficiency")
         if isinstance(imported_re, dict):
             self._room_efficiency_models.update(self._load_room_efficiency(imported_re))
+        imported_df = payload.get("door_factor")
+        if isinstance(imported_df, dict):
+            self._door_factor_models.update(self._load_door_factor(imported_df))
 
         entries = data.get("roomEfficiencies") or []
         if not isinstance(entries, list):
@@ -3582,6 +3650,81 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 return self.get_vent_efficiency_percent(vent_id, mode)
         return None
 
+    def get_room_door_factor(self, room_id: str) -> float | None:
+        """Resolved door-leakage multiplier for a room's active mode (R30.1/30.3).
+
+        Returns the value from :func:`learning.resolve_door_factor` for the
+        room's active/most-recent conditioning mode, always within
+        ``[DOOR_FACTOR_MIN, DOOR_FACTOR_MAX]``. Returns ``None`` when the room
+        has no door sensor configured on any of its vents, so the optimizer
+        never surfaces a misleading learned factor for a room it cannot observe
+        (R30.2).
+        """
+        info = self._resolve_room_door_factor(room_id)
+        return None if info is None else info[0]
+
+    def get_room_door_factor_trusted(self, room_id: str) -> bool | None:
+        """Whether the active mode's door-factor cell meets the gate (R30.1).
+
+        ``True`` only when the active mode's cell has ``n >= DOOR_MIN_N`` and a
+        learned ``factor`` present; ``False`` while the resolution falls back to
+        the default. Returns ``None`` when the room has no door sensor (R30.2).
+        """
+        info = self._resolve_room_door_factor(room_id)
+        return None if info is None else info[1]
+
+    def _resolve_room_door_factor(self, room_id: str) -> tuple[float, bool] | None:
+        """Resolve ``(door_factor, trusted)`` for a Flair ``room_id`` (R30).
+
+        Returns ``None`` unless at least one of the room's vents has a door
+        sensor configured (``CONF_DOOR_SENSOR_ENTITY``) — the R30.2 gate that
+        keeps a sensorless room from surfacing a learned factor. The room key
+        mirrors the learning write (room name, falling back to the vent id when
+        unnamed) and the active mode is taken from the room thermostat's
+        most-recent ``hvac_action`` (``CONF_THERMOSTAT_ENTITY``). The factor is
+        always clamped to ``[DOOR_FACTOR_MIN, DOOR_FACTOR_MAX]`` by
+        :func:`learning.resolve_door_factor`; the trust flag inspects the active
+        mode's cell directly (not the cross-mode fallback), so a learned factor
+        that happens to equal the ``0.9`` default is still reported as trusted.
+        """
+        data = self.data or {}
+        assignments = self._get_vent_assignments()
+        room_key: str | None = None
+        thermostat: str | None = None
+        has_door_sensor = False
+        for vent_id, vent in (data.get("vents") or {}).items():
+            if (vent.get("room") or {}).get("id") != room_id:
+                continue
+            if room_key is None:
+                room_key = self._get_room_name(vent_id, data) or vent_id
+            assignment = assignments.get(vent_id) or {}
+            if assignment.get(CONF_DOOR_SENSOR_ENTITY):
+                has_door_sensor = True
+            if thermostat is None and assignment.get(CONF_THERMOSTAT_ENTITY):
+                thermostat = assignment.get(CONF_THERMOSTAT_ENTITY)
+        if room_key is None or not has_door_sensor:
+            return None
+        action = self._last_hvac_action.get(thermostat or "")
+        mode = "cooling" if action == HVACAction.COOLING else "heating"
+        model = self._door_factor_models.get(room_key)
+        factor = resolve_door_factor(model, mode)
+        trusted = self._door_factor_cell_trusted(model, mode)
+        return factor, trusted
+
+    @staticmethod
+    def _door_factor_cell_trusted(model: DoorFactorModel | None, mode: str) -> bool:
+        """Whether ``mode``'s door-factor cell meets the confidence gate (R30.1).
+
+        Inspects the cell directly — ``n >= DOOR_MIN_N`` with a learned
+        ``factor`` present — rather than comparing the resolved value to the
+        default, since a learned factor can legitimately equal the ``0.9``
+        fallback.
+        """
+        if model is None:
+            return False
+        cell = getattr(model, mode, None)
+        return bool(cell is not None and cell.factor is not None and cell.n >= DOOR_MIN_N)
+
     def get_vent_leak(self, vent_id: str, mode: str) -> float:
         """Per-vent learned leakage fraction for diagnostics (R25.11)."""
         action = HVACAction.COOLING if mode == "cooling" else HVACAction.HEATING
@@ -3594,7 +3737,7 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not events:
             return
         if now is None:
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
         cutoff = now - timedelta(hours=window_hours)
         pruned: list[dict[str, Any]] = []
         for event in events:
@@ -3632,7 +3775,7 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def get_vent_adjustment_stats(self, vent_id: str, window_hours: float = 24.0) -> dict[str, float]:
         if not hasattr(self, "_vent_adjustments") or self._vent_adjustments is None:
             self._vent_adjustments = {}
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         self._prune_adjustments(vent_id, now=now, window_hours=max(window_hours, 1.0))
         events = self._vent_adjustments.get(vent_id, [])
         if not events:
@@ -3830,6 +3973,9 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "room_efficiency": {
                         room: room_model_to_dict(model)
                         for room, model in self._room_efficiency_models.items()
+                    },
+                    "door_factor": {
+                        room: door_factor_to_dict(model) for room, model in self._door_factor_models.items()
                     },
                     "vent_effectiveness": self._vent_effectiveness,
                     "last_hvac_action": self._last_hvac_action,

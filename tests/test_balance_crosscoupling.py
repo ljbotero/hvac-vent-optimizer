@@ -56,7 +56,12 @@ import importlib.util
 import pathlib
 import sys
 
-_BALANCE_PATH = pathlib.Path(__file__).resolve().parent.parent / "custom_components" / "hvac_vent_optimizer" / "balance.py"
+_BALANCE_PATH = (
+    pathlib.Path(__file__).resolve().parent.parent
+    / "custom_components"
+    / "hvac_vent_optimizer"
+    / "balance.py"
+)
 _spec = importlib.util.spec_from_file_location("hvo_balance", _BALANCE_PATH)
 balance = importlib.util.module_from_spec(_spec)
 # Register before exec so dataclass introspection (with `from __future__ import
@@ -200,9 +205,7 @@ class TestCrossCoupling:
         ]
         targets = {"Bedroom 2": 100.0, "Bathroom": 30.0}  # satisfied room non-zero
         airflow_limited = frozenset({"Bedroom 2"})
-        new = balance.apply_cross_coupling(
-            targets, rooms, MODE, SETPOINT_C, _settings(), airflow_limited
-        )
+        new = balance.apply_cross_coupling(targets, rooms, MODE, SETPOINT_C, _settings(), airflow_limited)
         assert new["Bathroom"] == 0.0  # pushed closed
         assert new["Bedroom 2"] == 100.0  # laggard untouched
         # Input dict is not mutated (pure).
@@ -226,9 +229,7 @@ class TestCrossCoupling:
             _room("Bathroom", temp_c=25.7, efficiency=0.438),
         ]
         targets = {"Warm": 50.0, "Bathroom": 30.0}
-        new = balance.apply_cross_coupling(
-            targets, rooms, MODE, SETPOINT_C, _settings(), frozenset()
-        )
+        new = balance.apply_cross_coupling(targets, rooms, MODE, SETPOINT_C, _settings(), frozenset())
         assert new == targets
 
     def test_disabled_crosscoupling_does_not_push(self):
@@ -322,9 +323,7 @@ class TestDuctSignals:
         # cross-coupling move is pointless and must be vetoed.
         rooms, targets, limited = self._scenario()
         duct = balance.DuctSignals(duct_temp_c=26.0, duct_pressure_pa=0.0)
-        new = balance.apply_cross_coupling(
-            targets, rooms, MODE, SETPOINT_C, _settings(), limited, duct=duct
-        )
+        new = balance.apply_cross_coupling(targets, rooms, MODE, SETPOINT_C, _settings(), limited, duct=duct)
         assert new["Bathroom"] == 30.0  # veto → unchanged
         assert new == targets
 
@@ -333,9 +332,7 @@ class TestDuctSignals:
         # flowing → the push proceeds.
         rooms, targets, limited = self._scenario()
         duct = balance.DuctSignals(duct_temp_c=12.0, duct_pressure_pa=60.0)
-        new = balance.apply_cross_coupling(
-            targets, rooms, MODE, SETPOINT_C, _settings(), limited, duct=duct
-        )
+        new = balance.apply_cross_coupling(targets, rooms, MODE, SETPOINT_C, _settings(), limited, duct=duct)
         assert new["Bathroom"] == 0.0  # push applied
 
     def test_absent_duct_signals_degrade_gracefully(self):
@@ -354,18 +351,14 @@ class TestDuctSignals:
         # Only a pressure signal, reading ~0 → no airflow → veto.
         rooms, targets, limited = self._scenario()
         duct = balance.DuctSignals(duct_pressure_pa=0.0)
-        new = balance.apply_cross_coupling(
-            targets, rooms, MODE, SETPOINT_C, _settings(), limited, duct=duct
-        )
+        new = balance.apply_cross_coupling(targets, rooms, MODE, SETPOINT_C, _settings(), limited, duct=duct)
         assert new["Bathroom"] == 30.0  # vetoed
 
     def test_partial_duct_temp_only_confirms_flow(self):
         # Only a (cold) duct-temp signal → flow confirmed → push proceeds.
         rooms, targets, limited = self._scenario()
         duct = balance.DuctSignals(duct_temp_c=12.0)
-        new = balance.apply_cross_coupling(
-            targets, rooms, MODE, SETPOINT_C, _settings(), limited, duct=duct
-        )
+        new = balance.apply_cross_coupling(targets, rooms, MODE, SETPOINT_C, _settings(), limited, duct=duct)
         assert new["Bathroom"] == 0.0
 
 
@@ -385,9 +378,7 @@ class TestAllocateIntegration:
         # allocate threads an optional duct signal through to the guard without
         # changing the satisfied-room result (already 0 from A1).
         duct = balance.DuctSignals(duct_temp_c=12.0, duct_pressure_pa=60.0)
-        result = balance.allocate(
-            _worked_rooms(), SETPOINT_C, MODE, _settings(crosscoupling=True), duct=duct
-        )
+        result = balance.allocate(_worked_rooms(), SETPOINT_C, MODE, _settings(crosscoupling=True), duct=duct)
         assert result.targets["Bathroom"] == 0.0
 
     def test_allocate_deterministic_with_crosscoupling(self):

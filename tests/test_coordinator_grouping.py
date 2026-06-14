@@ -73,9 +73,7 @@ def _build(
     for v in vents_spec:
         room_name = v["room"]
         room_id = room_ids.setdefault(room_name, f"room_{room_name}")
-        vents[v["id"]] = _vent(
-            v["id"], room_id, room_name, v["temp"], v["active"], v["open"]
-        )
+        vents[v["id"]] = _vent(v["id"], room_id, room_name, v["temp"], v["active"], v["open"])
         assignments[v["id"]] = {
             const.CONF_THERMOSTAT_ENTITY: thermostat,
             const.CONF_TEMP_SENSOR_ENTITY: None,
@@ -157,9 +155,9 @@ def test_master_room_two_vents_get_identical_applied_target():
     _run(coord, thermostat, data)
     calls = _calls(api)
     assert M1 in calls and M2 in calls, "both Master vents must be commanded"
-    assert calls[M1] == calls[M2], (
-        f"Master vents must get identical applied target, got {calls[M1]} vs {calls[M2]}"
-    )
+    assert (
+        calls[M1] == calls[M2]
+    ), f"Master vents must get identical applied target, got {calls[M1]} vs {calls[M2]}"
     assert calls[M1] == 100, "the hot bottleneck room must be driven to 100%"
 
 
@@ -184,12 +182,12 @@ def test_master_room_vents_do_not_diverge_via_deadband():
     )
     _run(coord, thermostat, data)
     calls = _calls(api)
-    assert M1 in calls and M2 in calls, (
-        "both Master vents must move together, not just the one outside the deadband"
-    )
-    assert calls[M1] == calls[M2] == 0, (
-        f"grouped vents must converge to the identical target 0, got {calls[M1]} vs {calls[M2]}"
-    )
+    assert (
+        M1 in calls and M2 in calls
+    ), "both Master vents must move together, not just the one outside the deadband"
+    assert (
+        calls[M1] == calls[M2] == 0
+    ), f"grouped vents must converge to the identical target 0, got {calls[M1]} vs {calls[M2]}"
 
 
 # ---------------------------------------------------------------------------
@@ -217,13 +215,13 @@ def test_group_shares_one_cooldown_clock_even_when_one_vent_already_correct():
     assert M1 not in calls, "the vent already at target should not be re-commanded"
 
     # ...but BOTH vents share the cooldown clock (R23.2).
-    assert M1 in coord._vent_last_commanded, (
-        "the group's command must stamp the shared cooldown clock onto every vent"
-    )
+    assert (
+        M1 in coord._vent_last_commanded
+    ), "the group's command must stamp the shared cooldown clock onto every vent"
     assert M2 in coord._vent_last_commanded
-    assert coord._vent_last_commanded[M1] == coord._vent_last_commanded[M2], (
-        "grouped vents must share one cooldown timestamp"
-    )
+    assert (
+        coord._vent_last_commanded[M1] == coord._vent_last_commanded[M2]
+    ), "grouped vents must share one cooldown timestamp"
 
 
 def test_group_held_on_second_poll_within_min_interval():
@@ -243,9 +241,9 @@ def test_group_held_on_second_poll_within_min_interval():
     # Second poll immediately after (well inside the 30-min cooldown).
     _run(coord, thermostat, data)
     new_calls = api.set_vent_calls[calls_before:]
-    assert all(vid not in (M1, M2) for vid, _pct in new_calls), (
-        "the shared cooldown must hold both grouped vents on the second poll"
-    )
+    assert all(
+        vid not in (M1, M2) for vid, _pct in new_calls
+    ), "the shared cooldown must hold both grouped vents on the second poll"
 
 
 # ---------------------------------------------------------------------------
@@ -275,6 +273,7 @@ def test_group_passes_each_physical_vent_to_safety_floor(monkeypatch):
     )
     _run(coord, thermostat, data)
     assert seen.get("master_vent_ids") is not None, "balance must route through the floor"
-    assert set(seen["master_vent_ids"]) == {M1, M2}, (
-        "both physical vents must be counted individually in the floor input (R23.4)"
-    )
+    assert set(seen["master_vent_ids"]) == {
+        M1,
+        M2,
+    }, "both physical vents must be counted individually in the floor input (R23.4)"

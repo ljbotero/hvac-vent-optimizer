@@ -2,6 +2,7 @@
 
 Imported only after conftest has installed the stub modules.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -60,8 +61,14 @@ class FakeHass:
 
 
 class FakeEntry:
-    def __init__(self, *, data: dict | None = None, options: dict | None = None,
-                 entry_id: str = "entry1", title: str = "Test"):
+    def __init__(
+        self,
+        *,
+        data: dict | None = None,
+        options: dict | None = None,
+        entry_id: str = "entry1",
+        title: str = "Test",
+    ):
         self.data = data or {}
         self.options = options or {}
         self.entry_id = entry_id

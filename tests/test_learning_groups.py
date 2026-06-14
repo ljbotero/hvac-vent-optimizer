@@ -68,6 +68,7 @@ Worked numeric examples:
     resolve_group_leaks(0.1, [0.05,0.30], [3,50])               = [0.1, 0.30]
 ====================================================================
 """
+
 from __future__ import annotations
 
 import importlib.util as _importlib_util
@@ -76,7 +77,12 @@ import sys as _sys
 
 import pytest
 
-_LEARNING_PATH = _pathlib.Path(__file__).resolve().parent.parent / "custom_components" / "hvac_vent_optimizer" / "learning.py"
+_LEARNING_PATH = (
+    _pathlib.Path(__file__).resolve().parent.parent
+    / "custom_components"
+    / "hvac_vent_optimizer"
+    / "learning.py"
+)
 
 
 def _load_learning():
@@ -126,9 +132,7 @@ def test_group_combined_flow_reduces_to_single_vent_flow(learn):
     # a one-vent "group" must equal the single-vent flow exactly
     for leak in (0.0, 0.1, 0.2, 0.35):
         for a in (0.0, 0.25, 0.5, 1.0):
-            assert learn.group_combined_flow([leak], [a]) == pytest.approx(
-                learn.flow(leak, a)
-            )
+            assert learn.group_combined_flow([leak], [a]) == pytest.approx(learn.flow(leak, a))
 
 
 def test_group_combined_flow_identical_apertures_equals_mean_leak_flow(learn):
@@ -136,9 +140,7 @@ def test_group_combined_flow_identical_apertures_equals_mean_leak_flow(learn):
     a = 0.4
     leaks = [0.05, 0.25, 0.30]
     mean_leak = sum(leaks) / len(leaks)
-    assert learn.group_combined_flow(leaks, [a, a, a]) == pytest.approx(
-        learn.flow(mean_leak, a)
-    )
+    assert learn.group_combined_flow(leaks, [a, a, a]) == pytest.approx(learn.flow(mean_leak, a))
 
 
 def test_group_combined_flow_is_order_independent(learn):
@@ -188,9 +190,7 @@ def test_group_combined_flow_length_mismatch_raises(learn):
 # ---------------------------------------------------------------------------
 def test_group_predicted_rate_worked_example(learn):
     # 0.25 * mean(flow(0.1,0.5), flow(0.3,0.5)) = 0.25 * 0.60 = 0.15
-    assert learn.group_predicted_rate(0.25, [0.1, 0.3], [50.0, 50.0]) == pytest.approx(
-        0.15
-    )
+    assert learn.group_predicted_rate(0.25, [0.1, 0.3], [50.0, 50.0]) == pytest.approx(0.15)
 
 
 def test_group_predicted_rate_matches_single_vent_predicted_rate(learn):
@@ -203,15 +203,11 @@ def test_group_predicted_rate_matches_single_vent_predicted_rate(learn):
 
 def test_group_predicted_rate_all_open_is_e_room(learn):
     # all vents fully open -> combined flow 1.0 -> rate == e_room
-    assert learn.group_predicted_rate(0.25, [0.1, 0.3], [100.0, 100.0]) == pytest.approx(
-        0.25
-    )
+    assert learn.group_predicted_rate(0.25, [0.1, 0.3], [100.0, 100.0]) == pytest.approx(0.25)
 
 
 def test_group_predicted_rate_all_closed_is_e_room_times_mean_leak(learn):
-    assert learn.group_predicted_rate(0.40, [0.1, 0.3], [0.0, 0.0]) == pytest.approx(
-        0.40 * 0.2
-    )
+    assert learn.group_predicted_rate(0.40, [0.1, 0.3], [0.0, 0.0]) == pytest.approx(0.40 * 0.2)
 
 
 def test_group_predicted_rate_matches_flow_composition(learn):
@@ -230,9 +226,7 @@ def test_group_predicted_rate_negative_e_room_clamps_non_negative(learn):
 def test_group_predicted_rate_out_of_range_aperture_is_safe(learn):
     # percents outside [0,100] clamp via flow; no negatives, no overflow past e_room
     assert learn.group_predicted_rate(0.25, [0.2, 0.2], [-10.0, 150.0]) >= 0.0
-    assert learn.group_predicted_rate(0.25, [0.2, 0.2], [150.0, 150.0]) == pytest.approx(
-        0.25
-    )
+    assert learn.group_predicted_rate(0.25, [0.2, 0.2], [150.0, 150.0]) == pytest.approx(0.25)
 
 
 def test_group_predicted_rate_non_decreasing_in_aperture(learn):
@@ -287,9 +281,7 @@ def test_resolve_group_leaks_feeds_combined_flow_stably(learn):
     group_leak = 0.15
     leaks = learn.resolve_group_leaks(group_leak, [0.02, 0.33], [1, 2])
     a = 0.5
-    assert learn.group_combined_flow(leaks, [a, a]) == pytest.approx(
-        learn.flow(group_leak, a)
-    )
+    assert learn.group_combined_flow(leaks, [a, a]) == pytest.approx(learn.flow(group_leak, a))
 
 
 def test_resolve_group_leaks_length_mismatch_raises(learn):
