@@ -1,0 +1,200 @@
+# =============================================================================
+# HVAC Vent Optimizer — portable "Smart Vents" dashboard
+# =============================================================================
+# Works on ANY install with no entity-ID editing:
+#   * The summary gauges/tiles use the integration's fixed `sensor.dab_*`
+#     entities (identical on every install).
+#   * The room comparison table auto-discovers your rooms with a template
+#     (it finds this integration's `*_room_temperature` sensors by their
+#     unique attributes), so it adapts to your room names automatically.
+#
+# The "Vents" and "Trends" sections auto-discover per-vent/per-room entities
+# using the `auto-entities` card (HACS: https://github.com/thomasloven/lovelace-auto-entities).
+# If you don't have auto-entities installed, simply delete those two sections —
+# the rest works on its own.
+#
+# HOW TO USE
+#   1. Settings → Dashboards → (＋ Add dashboard) → New dashboard from scratch.
+#   2. Open the new dashboard → top-right ✎ Edit → ⋮ → "Raw configuration editor".
+#   3. Replace the contents with this file and Save.
+# =============================================================================
+
+title: Smart Vents
+views:
+  - title: Smart Vents
+    path: smart-vents
+    icon: mdi:hvac
+    cards:
+      # ----------------------------------------------------------------------
+      # Summary — fixed entities, portable as-is
+      # ----------------------------------------------------------------------
+      - type: grid
+        columns: 2
+        square: false
+        cards:
+          - type: gauge
+            entity: sensor.dab_active_room_spread
+            name: Active-Room Spread
+            needle: true
+            min: 0
+            max: 9
+            severity: { green: 0, yellow: 1.8, red: 4.5 }
+          - type: gauge
+            entity: sensor.dab_max_active_error
+            name: Max Active Error
+            needle: true
+            min: 0
+            max: 5.4
+            severity: { green: 0, yellow: 1.5, red: 2.7 }
+
+      - type: glance
+        title: DAB status
+        columns: 3
+        entities:
+          - entity: sensor.dab_strategy_effectiveness
+            name: Strategy
+          - entity: sensor.dab_hold_status
+            name: Status
+          - entity: sensor.dab_recalculations_24h
+            name: Recalcs 24h
+          - entity: sensor.dab_holds_24h
+            name: Holds 24h
+          - entity: sensor.dab_time_above_guardrail
+            name: Above guardrail
+
+      - type: markdown
+        content: >
+          <details>
+
+          <summary><b>What these values mean</b> (tap to expand)</summary>
+
+
+          - **Strategy** — the balancing algorithm in use (Balance / DAB v2).
+
+          - **Status** — DAB state: *idle*, *holding* (within deadband), or *recalculating*.
+
+          - **Active-Room Spread** — temperature gap between the warmest and
+          coolest *active* rooms; lower = more even comfort. Reads 0 when idle
+          or balanced.
+
+          - **Max Active Error** — how far the worst active room is from its
+          setpoint; lower = closer to target.
+
+          - **Recalcs 24h** — times DAB recomputed vent targets in 24 h.
+
+          - **Holds 24h** — times DAB skipped a change because rooms were within
+          the deadband.
+
+          - **Above guardrail** — time a room spent beyond the safety deviation
+          guardrail.
+
+          </details>
+
+      # ----------------------------------------------------------------------
+      # Room comparison — auto-discovers rooms by template (no edits needed)
+      # ----------------------------------------------------------------------
+      - type: markdown
+        title: Room comparison
+        content: >
+          {% set ns = namespace(rooms=[]) %}
+
+          {% for s in states.sensor %}
+            {% if s.attributes.cooling_efficiency is defined
+                  and s.attributes.signed_error_c is defined
+                  and s.entity_id.endswith('_room_temperature') %}
+              {% set ns.rooms = ns.rooms + [s] %}
+            {% endif %}
+          {% endfor %}
+
+          **Δ** = distance to setpoint (°C, − = past target). ⚠️ = airflow-limited.
+          🚪/🔒 = door open/closed. **Leak** = learned open-door multiplier
+          (✓ learned, ~ default).
+
+
+          | Room | Temp | Δ°C | Air | ❄️ % | 🔥 % | 🚪 | Leak |
+
+          |:--|--:|--:|:--:|--:|--:|:--:|:--:|
+
+          {%- for s in ns.rooms | sort(attribute='name') %}
+          {%- set name = s.name | replace(' Room Temperature','') %}
+          {%- set t = s.state | float(None) %}
+          {%- set unit = s.attributes.unit_of_measurement or '' %}
+          {%- set e = s.attributes.signed_error_c %}
+          {%- set lim = '⚠️' if s.attributes.airflow_limited else '·' %}
+          {%- set ce = s.attributes.cooling_efficiency %}
+          {%- set he = s.attributes.heating_efficiency %}
+          {%- set dopen = s.attributes.door_open if 'door_open' in s.attributes else none %}
+          {%- set dstate = '🚪' if dopen else ('🔒' if dopen is not none else '—') %}
+          {%- set df = s.attributes.door_factor if 'door_factor' in s.attributes else none %}
+          {%- set dft = s.attributes.door_factor_trusted if 'door_factor_trusted' in s.attributes else false %}
+          {%- set dfx = ('%.2f'|format(df|float) ~ (' ✓' if dft else ' ~')) if df is not none else '—' %}
+          | **{{ name }}** | {{ '%g %s'|format(t|round(1), unit) if t is not none else '—' }} | {{ '%+.1f'|format(e|float) if e is not none else '—' }} | {{ lim }} | {{ ce|round(1) if ce is not none else '—' }} | {{ he|round(1) if he is not none else '—' }} | {{ dstate }} | {{ dfx }} |
+          {%- endfor %}
+
+      # ----------------------------------------------------------------------
+      # Vents — auto-discovered (requires the HACS `auto-entities` card).
+      # Delete this card if you don't have auto-entities.
+      # ----------------------------------------------------------------------
+      - type: custom:auto-entities
+        card:
+          type: entities
+          title: Vent control
+        filter:
+          include:
+            - integration: hvac_vent_optimizer
+              domain: cover
+        sort:
+          method: friendly_name
+
+      # ----------------------------------------------------------------------
+      # Trends — auto-discovered (requires `auto-entities`). Delete if unused.
+      # ----------------------------------------------------------------------
+      - type: custom:auto-entities
+        card:
+          type: history-graph
+          title: Room temperatures (24h)
+          hours_to_show: 24
+        filter:
+          include:
+            - integration: hvac_vent_optimizer
+              entity_id: sensor.*_room_temperature
+
+      - type: custom:auto-entities
+        card:
+          type: history-graph
+          title: Spread & max error (24h)
+          hours_to_show: 24
+        filter:
+          include:
+            - entity_id: sensor.dab_active_room_spread
+            - entity_id: sensor.dab_max_active_error
+
+      - type: custom:auto-entities
+        card:
+          type: history-graph
+          title: Vent aperture (24h)
+          hours_to_show: 24
+        filter:
+          include:
+            - integration: hvac_vent_optimizer
+              entity_id: sensor.*_aperture
+
+      - type: custom:auto-entities
+        card:
+          type: history-graph
+          title: Cooling efficiency (24h)
+          hours_to_show: 24
+        filter:
+          include:
+            - integration: hvac_vent_optimizer
+              entity_id: sensor.*_cooling_efficiency
+
+      - type: custom:auto-entities
+        card:
+          type: history-graph
+          title: Heating efficiency (24h)
+          hours_to_show: 24
+        filter:
+          include:
+            - integration: hvac_vent_optimizer
+              entity_id: sensor.*_heating_efficiency

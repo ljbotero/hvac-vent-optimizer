@@ -127,6 +127,16 @@ The screenshot above is a custom Lovelace view. It surfaces:
 
 The integration exposes all of these as standard entities, so you can build your own cards too.
 
+### Get this dashboard
+
+A ready-made, **portable** version lives at [`docs/lovelace/smart-vents-dashboard.yaml`](docs/lovelace/smart-vents-dashboard.yaml). It works on any install with no entity-ID editing:
+
+- The summary gauges/tiles use the integration's fixed `sensor.dab_*` entities (identical on every install).
+- The **room comparison table auto-discovers your rooms** via a template (it matches this integration's `*_room_temperature` sensors by their attributes), so it adapts to your room names automatically.
+- The vent-control and trend sections auto-discover per-vent entities using the [`auto-entities`](https://github.com/thomasloven/lovelace-auto-entities) HACS card. Don't have it? Just delete those two sections — the rest stands alone.
+
+To install: **Settings → Dashboards → Add dashboard → New dashboard from scratch**, open it, then **Edit → ⋮ → Raw configuration editor** and paste the file's contents.
+
 ## Sensors & entities
 
 - **Per vent**: position (`cover`), duct temperature, pressure, voltage, signal, plus learned **Cooling/Heating Efficiency (%)**.
