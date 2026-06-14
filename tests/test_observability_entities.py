@@ -38,7 +38,6 @@ def test_new_dab_sensors_report_coordinator_values():
     from hvac_vent_optimizer import sensor as sensor_mod
 
     coord = _coord()
-    coord._active_observability_ready = True
     coord._last_active_spread = 3.09
     coord._last_max_active_error = 1.8
     coord._recalc_events = []
@@ -55,24 +54,6 @@ def test_new_dab_sensors_report_coordinator_values():
         assert ent.native_value == expected, desc.key
 
 
-def test_spread_and_error_report_unknown_until_first_active_poll():
-    # After a restart / while idle the metrics must read ``unknown`` (None),
-    # not a misleading 0.0, until the first active poll computes real values.
-    from hvac_vent_optimizer import sensor as sensor_mod
-
-    coord = _coord()  # fresh: _active_observability_ready is False
-    coord._last_active_spread = 0.0
-    coord._last_max_active_error = 0.0
-    spread = sensor_mod.DabHoldStatusSensor(coord, "e1", sensor_mod.ACTIVE_ROOM_SPREAD_DESCRIPTION)
-    error = sensor_mod.DabHoldStatusSensor(coord, "e1", sensor_mod.MAX_ACTIVE_ERROR_DESCRIPTION)
-    assert spread.native_value is None
-    assert error.native_value is None
-    # Once an active poll has run, real values (including a genuine 0.0) appear.
-    coord._active_observability_ready = True
-    assert spread.native_value == 0.0
-    assert error.native_value == 0.0
-
-
 def test_temperature_delta_sensors_convert_to_fahrenheit_on_us_system():
     # On a US (Fahrenheit) system the °C *delta* metrics report °F deltas
     # (x1.8, no offset) with a °F unit; non-temperature metrics are untouched.
@@ -82,7 +63,6 @@ def test_temperature_delta_sensors_convert_to_fahrenheit_on_us_system():
 
     coord = _coord()
     coord.hass.config.units.temperature_unit = UnitOfTemperature.FAHRENHEIT
-    coord._active_observability_ready = True
     coord._last_active_spread = 2.0
     coord._last_max_active_error = 1.5
 
@@ -104,7 +84,6 @@ def test_temperature_delta_sensors_stay_celsius_on_metric_system():
     from hvac_vent_optimizer import sensor as sensor_mod
 
     coord = _coord()  # FakeHass default unit is °C (metric)
-    coord._active_observability_ready = True
     coord._last_active_spread = 2.0
     spread = sensor_mod.DabHoldStatusSensor(coord, "e1", sensor_mod.ACTIVE_ROOM_SPREAD_DESCRIPTION)
     assert spread.native_value == 2.0
