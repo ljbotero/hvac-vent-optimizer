@@ -42,3 +42,19 @@ repos:
         # baseline is tightened.
         additional_dependencies: []
         exclude: ^tests/
+
+  # Whole-repo guard that mirrors the hassfest rules which have broken `main`
+  # before (UTF-8 BOM, URLs in translation strings, manifest key order). The
+  # built-in hooks above only see staged files, so a BOM/URL hiding in an
+  # untouched file slips through; this scans the whole component. It runs at the
+  # pre-push stage so it doesn't slow every commit.
+  #   Enable with:  pre-commit install --hook-type pre-push
+  - repo: local
+    hooks:
+      - id: check-integration
+        name: hassfest-lite (BOM / translation URLs / manifest order)
+        entry: python3 scripts/check_integration.py
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
