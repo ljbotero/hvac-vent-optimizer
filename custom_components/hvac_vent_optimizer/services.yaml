@@ -81,7 +81,7 @@ refresh_devices:
 
 export_efficiency:
   name: Export efficiency data
-  description: Export learned DAB efficiency data to a JSON file, or return payload when no path is provided.
+  description: Export learned DAB efficiency data to a YAML file (or JSON if the path ends in .json), or return the payload when no path is provided.
   fields:
     entry_id:
       name: Entry ID
@@ -89,12 +89,12 @@ export_efficiency:
       example: "abcd1234"
     efficiency_path:
       name: Export file path
-      description: Optional path under your HA config directory. If omitted, the payload is returned in the service response.
-      example: "hvac_vent_optimizer_efficiency_export.json"
+      description: Optional path under your HA config directory. Writes YAML by default, or JSON when the path ends in .json. If omitted, the payload is returned in the service response.
+      example: "hvac_vent_optimizer_efficiency_export.yaml"
 
 import_efficiency:
   name: Import efficiency data
-  description: Import learned DAB efficiency data from a JSON file.
+  description: Import learned DAB efficiency data from a YAML or JSON file.
   fields:
     entry_id:
       name: Entry ID
@@ -102,8 +102,8 @@ import_efficiency:
       example: "abcd1234"
     efficiency_path:
       name: Import file path
-      description: Optional path under your HA config directory (use this OR efficiency_payload).
-      example: "custom_components/hvac_vent_optimizer/eficiency_export.json"
+      description: Optional path under your HA config directory to a YAML or JSON file (use this OR efficiency_payload).
+      example: "custom_components/hvac_vent_optimizer/efficiency_export.yaml"
     efficiency_payload:
       name: Import payload
       description: Optional inline JSON payload (use this OR efficiency_path).

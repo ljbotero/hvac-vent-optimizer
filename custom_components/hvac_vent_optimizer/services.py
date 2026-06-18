@@ -8,6 +8,7 @@ import os
 from typing import Any
 
 import voluptuous as vol
+import yaml  # type: ignore[import-untyped]  # PyYAML ships no type stubs
 from homeassistant.core import HomeAssistant, ServiceCall
 
 try:
@@ -15,7 +16,6 @@ try:
 except Exception:  # noqa: BLE001  # pragma: no cover - older HA versions lack SupportsResponse
     SupportsResponse = None
 from homeassistant.components import persistent_notification
-from homeassistant.util import json as json_util
 
 from .const import (
     CONF_ACTIVE,
@@ -253,9 +253,9 @@ async def async_register_services(hass: HomeAssistant) -> None:
                 path = _resolve_efficiency_path(
                     hass,
                     path_input,
-                    f"{DOMAIN}_efficiency_export_{coordinator.entry.entry_id}.json",
+                    f"{DOMAIN}_efficiency_export_{coordinator.entry.entry_id}.yaml",
                 )
-                await hass.async_add_executor_job(_save_json, path, payload)
+                await hass.async_add_executor_job(_dump_efficiency_file, path, payload)
                 _LOGGER.info("Exported efficiency data to %s", path)
                 return {"saved_to": path}
             return payload
@@ -288,7 +288,7 @@ async def async_register_services(hass: HomeAssistant) -> None:
                 )
                 if not await hass.async_add_executor_job(os.path.exists, path):
                     raise FileNotFoundError(path)
-                payload = await hass.async_add_executor_job(json_util.load_json, path)
+                payload = await hass.async_add_executor_job(_load_efficiency_file, path)
             result = await coordinator.async_import_efficiency(payload)
             _LOGGER.info(
                 "Imported efficiency data: %s entries (%s applied, %s unmatched)",
@@ -404,6 +404,26 @@ def _resolve_efficiency_path(hass: HomeAssistant, path: str | None, default_name
     return path_real
 
 
-def _save_json(path: str, payload: dict[str, Any]) -> None:
-    with open(path, "w", encoding="utf-8") as file:
-        json.dump(payload, file, indent=2, sort_keys=True)
+def _dump_efficiency_file(path: str, payload: dict[str, Any]) -> None:
+    """Write the efficiency payload, choosing the format by file extension.
+
+    Defaults to YAML so the export round-trips with the YAML-first import below;
+    a path ending in ``.json`` still writes JSON to preserve existing
+    (Hubitat-compatible) JSON workflows.
+    """
+    if path.lower().endswith(".json"):
+        with open(path, "w", encoding="utf-8") as file:
+            json.dump(payload, file, indent=2, sort_keys=True)
+    else:
+        with open(path, "w", encoding="utf-8") as file:
+            yaml.safe_dump(payload, file, default_flow_style=False, sort_keys=True, allow_unicode=True)
+
+
+def _load_efficiency_file(path: str) -> Any:
+    """Load an efficiency payload from a YAML or JSON file.
+
+    YAML is a superset of JSON, so a single ``safe_load`` transparently accepts
+    both the new ``.yaml`` exports and any older ``.json`` exports.
+    """
+    with open(path, encoding="utf-8") as file:
+        return yaml.safe_load(file)
