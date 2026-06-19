@@ -77,8 +77,8 @@ def test_config_flow_version_bumped_for_migration():
 
 
 def test_new_install_resolves_to_balance():
-    """A fresh v2 entry with no explicit strategy resolves to ``balance``."""
-    entry = _Entry(version=2, options={})
+    """A fresh v3 entry with no explicit strategy resolves to ``balance``."""
+    entry = _Entry(version=3, options={})
     # New installs are created at the current version → not migrated.
     _, ok = _migrate(entry)
     assert ok is True
@@ -93,7 +93,7 @@ def test_upgrade_preserves_explicit_legacy_selection():
     entry = _Entry(version=1, options={const.CONF_CONTROL_STRATEGY: "dab"})
     _, ok = _migrate(entry)
     assert ok is True
-    assert entry.version == 2
+    assert entry.version == 3
     assert _resolved_strategy(entry) == "dab"
 
 
@@ -113,15 +113,54 @@ def test_upgrade_without_explicit_strategy_pins_legacy_default():
     entry = _Entry(version=1, options={})
     _, ok = _migrate(entry)
     assert ok is True
-    assert entry.version == 2
+    assert entry.version == 3
     assert entry.options[const.CONF_CONTROL_STRATEGY] == const.LEGACY_DEFAULT_CONTROL_STRATEGY
     assert _resolved_strategy(entry) == "hybrid"
 
 
-def test_migration_is_idempotent_on_v2_entries():
-    """Re-running migration on an already-current entry changes nothing."""
-    entry = _Entry(version=2, options={const.CONF_CONTROL_STRATEGY: "stats"})
+def test_migration_is_idempotent_on_current_entries():
+    """Re-running migration on an already-current (v3) entry changes nothing."""
+    entry = _Entry(version=3, options={const.CONF_CONTROL_STRATEGY: "stats"})
     hass, ok = _migrate(entry)
     assert ok is True
     assert entry.options[const.CONF_CONTROL_STRATEGY] == "stats"
     assert hass.config_entries.updates == []  # no write performed
+
+
+# ---------------------------------------------------------------------------
+# v2 -> v3 — inactive-room option reframed as open_inactive_rooms.
+# Intentionally NOT behaviour-preserving: existing installs are moved onto the
+# new open-by-default (checkbox checked) and the legacy key is dropped.
+# ---------------------------------------------------------------------------
+def test_upgrade_forces_open_inactive_true_when_no_legacy_key():
+    entry = _Entry(version=2, options={})
+    _, ok = _migrate(entry)
+    assert ok is True
+    assert entry.version == 3
+    assert entry.options[const.CONF_OPEN_INACTIVE_ROOMS] is True
+
+
+def test_upgrade_forces_open_true_even_when_legacy_was_closing():
+    """A v2 install that was closing inactive rooms is still moved to open."""
+    entry = _Entry(version=2, options={const.CONF_CLOSE_INACTIVE_ROOMS: True})
+    _migrate(entry)
+    assert entry.options[const.CONF_OPEN_INACTIVE_ROOMS] is True
+    # Legacy key is dropped so it can't shadow the new option.
+    assert const.CONF_CLOSE_INACTIVE_ROOMS not in entry.options
+
+
+def test_upgrade_drops_legacy_open_key_and_sets_new():
+    entry = _Entry(version=2, options={const.CONF_CLOSE_INACTIVE_ROOMS: False})
+    _migrate(entry)
+    assert entry.options[const.CONF_OPEN_INACTIVE_ROOMS] is True
+    assert const.CONF_CLOSE_INACTIVE_ROOMS not in entry.options
+
+
+def test_new_install_leaves_inactive_key_unset_for_default_open():
+    """A genuinely new v3 entry gets no inactive key written; the coordinator's
+    open-by-default applies and the migration performs no write."""
+    entry = _Entry(version=3, options={})
+    hass, ok = _migrate(entry)
+    assert ok is True
+    assert const.CONF_OPEN_INACTIVE_ROOMS not in entry.options
+    assert hass.config_entries.updates == []

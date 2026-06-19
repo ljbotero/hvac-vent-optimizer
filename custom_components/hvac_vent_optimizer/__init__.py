@@ -14,12 +14,14 @@ from .const import (
     CONF_ADJUSTMENT_WINDOW_MINUTES,
     CONF_CLIENT_ID,
     CONF_CLIENT_SECRET,
+    CONF_CLOSE_INACTIVE_ROOMS,
     CONF_CONTROL_STRATEGY,
     CONF_DEADBAND_PERCENT,
     CONF_DEVIATION_THRESHOLD,
     CONF_MAX_ADJUSTMENT_BATCHES_PER_CYCLE,
     CONF_MAX_ADJUSTMENT_BATCHES_PER_WINDOW,
     CONF_MAX_RECALC_PER_CYCLE,
+    CONF_OPEN_INACTIVE_ROOMS,
     CONF_TEMP_ERROR_OVERRIDE,
     CONF_VENT_BRAND,
     DEFAULT_ADJUSTMENT_WINDOW_MINUTES,
@@ -85,7 +87,7 @@ async def _async_migrate_options(hass: HomeAssistant, entry: ConfigEntry) -> Non
 
 
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Migrate a config entry to the current version.
+    """Migrate a config entry to the current version (stepwise, idempotent).
 
     v1 → v2 (Task 27): the integration-wide default control strategy flips to
     ``balance`` (R16.1/R17.1). To honour R17.3 ("no silent override of an
@@ -98,11 +100,20 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
       (``hybrid``). We pin that explicitly so the upgrade does not silently
       switch the running behaviour to ``balance``.
 
+    v2 → v3: the inactive-room option is reframed positively as
+    ``CONF_OPEN_INACTIVE_ROOMS`` ("open vents in rooms marked inactive",
+    default open). Existing installs are intentionally moved to the new default
+    here — the option is force-set to ``True`` (checkbox checked) regardless of
+    the prior ``close_inactive_rooms`` value, because keeping inactive vents open
+    is safer for duct static pressure and keeps room-efficiency learning current.
+
     New installs are created at the current version and therefore never reach
-    this migration, so they fall through to the new ``balance`` default.
+    this migration, so they fall through to the new defaults.
     """
-    if entry.version < 2:
-        opts = dict(entry.options)
+    opts = dict(entry.options)
+    version = entry.version
+
+    if version < 2:
         if CONF_CONTROL_STRATEGY not in opts:
             opts[CONF_CONTROL_STRATEGY] = LEGACY_DEFAULT_CONTROL_STRATEGY
             _LOGGER.info(
@@ -112,7 +123,23 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 LEGACY_DEFAULT_CONTROL_STRATEGY,
                 entry.entry_id,
             )
-        hass.config_entries.async_update_entry(entry, options=opts, version=2)
+        version = 2
+
+    if version < 3:
+        # Intentionally NOT behaviour-preserving: move existing installs onto the
+        # new open-inactive default (checkbox checked) and drop the legacy key.
+        opts.pop(CONF_CLOSE_INACTIVE_ROOMS, None)
+        if opts.get(CONF_OPEN_INACTIVE_ROOMS) is not True:
+            opts[CONF_OPEN_INACTIVE_ROOMS] = True
+            _LOGGER.info(
+                "Set %s=True for entry %s (upgrading to open-inactive-by-default)",
+                CONF_OPEN_INACTIVE_ROOMS,
+                entry.entry_id,
+            )
+        version = 3
+
+    if version != entry.version or opts != dict(entry.options):
+        hass.config_entries.async_update_entry(entry, options=opts, version=version)
 
     return True
 

@@ -55,6 +55,7 @@ from .const import (
     CONF_MIN_ADJUSTMENT_INTERVAL,
     CONF_MIN_ADJUSTMENT_PERCENT,
     CONF_NOTIFY_EFFICIENCY_CHANGES,
+    CONF_OPEN_INACTIVE_ROOMS,
     CONF_OUTDOOR_TEMP_ENTITY,
     CONF_POLL_INTERVAL_ACTIVE,
     CONF_POLL_INTERVAL_IDLE,
@@ -86,6 +87,7 @@ from .const import (
     DEFAULT_MIN_ADJUSTMENT_INTERVAL,
     DEFAULT_MIN_ADJUSTMENT_PERCENT,
     DEFAULT_NOTIFY_EFFICIENCY_CHANGES,
+    DEFAULT_OPEN_INACTIVE_ROOMS,
     DEFAULT_POLL_INTERVAL_ACTIVE,
     DEFAULT_POLL_INTERVAL_IDLE,
     DEFAULT_SAFETY_FLOOR_PCT,
@@ -1122,13 +1124,35 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             metrics["last_active_temp_error"] = active_temp_error
             metrics["last_active_rooms"] = active_rooms
 
+    def _resolve_close_inactive(self) -> bool:
+        """Resolve the effective "close inactive rooms" behaviour (bool).
+
+        The user-facing option was reframed positively as
+        :data:`CONF_OPEN_INACTIVE_ROOMS` ("open vents in rooms marked inactive",
+        default ON) — the inverse of the legacy ``close_inactive_rooms`` key.
+        Resolution order, newest first, so back-compat installs keep working:
+
+        * new key present  -> ``close_inactive = not open_inactive`` ;
+        * legacy key present -> use it verbatim (pre-v3 entries that the
+          migration somehow missed) ;
+        * neither -> the new default (open inactive vents), i.e. ``close = False``.
+        """
+        opts = self.entry.options
+        if CONF_OPEN_INACTIVE_ROOMS in opts:
+            return not bool(opts[CONF_OPEN_INACTIVE_ROOMS])
+        if CONF_CLOSE_INACTIVE_ROOMS in opts:
+            return bool(opts[CONF_CLOSE_INACTIVE_ROOMS])
+        return not DEFAULT_OPEN_INACTIVE_ROOMS
+
     def get_strategy_metrics(self) -> dict[str, Any]:
+        close_inactive = self._resolve_close_inactive()
         return {
             "last_strategy": self._last_strategy,
             "strategies": self._strategy_metrics,
             "vent_brand": self._get_brand(),
             "dab_enabled": self.entry.options.get(CONF_DAB_ENABLED, False),
-            "close_inactive_rooms": self.entry.options.get(CONF_CLOSE_INACTIVE_ROOMS, True),
+            "open_inactive_rooms": not close_inactive,
+            "close_inactive_rooms": close_inactive,
             "min_adjustment_percent": self.entry.options.get(
                 CONF_MIN_ADJUSTMENT_PERCENT, DEFAULT_MIN_ADJUSTMENT_PERCENT
             ),
@@ -1662,7 +1686,7 @@ class FlairCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
             return
 
-        close_inactive = self.entry.options.get(CONF_CLOSE_INACTIVE_ROOMS, True)
+        close_inactive = self._resolve_close_inactive()
         granularity = int(self.entry.options.get(CONF_VENT_GRANULARITY, 5))
         control_strategy = self.entry.options.get(CONF_CONTROL_STRATEGY, DEFAULT_CONTROL_STRATEGY)
         min_adjust_percent = int(

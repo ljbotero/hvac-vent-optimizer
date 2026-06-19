@@ -40,6 +40,7 @@ from .const import (
     CONF_MIN_ADJUSTMENT_INTERVAL,
     CONF_MIN_ADJUSTMENT_PERCENT,
     CONF_NOTIFY_EFFICIENCY_CHANGES,
+    CONF_OPEN_INACTIVE_ROOMS,
     CONF_OUTDOOR_TEMP_ENTITY,
     CONF_POLL_INTERVAL_ACTIVE,
     CONF_POLL_INTERVAL_IDLE,
@@ -59,7 +60,6 @@ from .const import (
     DEFAULT_ADJUSTMENT_WINDOW_MINUTES,
     DEFAULT_AIRFLOW_LIMITED_ERROR_C,
     DEFAULT_AIRFLOW_LIMITED_MARGIN_PCT,
-    DEFAULT_CLOSE_INACTIVE_ROOMS,
     DEFAULT_CONTROL_STRATEGY,
     DEFAULT_CONVENTIONAL_VENTS,
     DEFAULT_CROSSCOUPLING_ENABLED,
@@ -76,6 +76,7 @@ from .const import (
     DEFAULT_MIN_ADJUSTMENT_INTERVAL,
     DEFAULT_MIN_ADJUSTMENT_PERCENT,
     DEFAULT_NOTIFY_EFFICIENCY_CHANGES,
+    DEFAULT_OPEN_INACTIVE_ROOMS,
     DEFAULT_POLL_INTERVAL_ACTIVE,
     DEFAULT_POLL_INTERVAL_IDLE,
     DEFAULT_SAFETY_FLOOR_PCT,
@@ -98,10 +99,11 @@ _LOGGER = logging.getLogger(__name__)
 class HvacVentOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: ignore[call-arg]
     """Handle a config flow for HVAC Vent Optimizer."""
 
-    # v2 (Task 27): the default control strategy flips to ``balance``. The bump
-    # lets ``async_migrate_entry`` preserve pre-``balance`` installs (R17.3)
-    # while new (v2) entries fall through to the new default (R16.1/R17.1).
-    VERSION = 2
+    # v2 (Task 27): the default control strategy flips to ``balance``. v3: the
+    # inactive-room option is reframed as ``open_inactive_rooms`` (default open).
+    # Each bump lets ``async_migrate_entry`` preserve pre-existing installs while
+    # new entries fall through to the new defaults.
+    VERSION = 3
 
     def __init__(self) -> None:
         self._client_id: str | None = None
@@ -208,7 +210,7 @@ class HvacVentOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # 
                     vol.Required(
                         CONF_MANUAL_VENT_COUNT,
                         default=DEFAULT_MANUAL_VENT_COUNT,
-                    ): vol.All(vol.Coerce(int), vol.Range(min=1, max=50)),
+                    ): _number_box(min_value=1, max_value=50),
                 }
             ),
             errors=errors,
@@ -399,7 +401,7 @@ class HvacVentOptimizerOptionsFlow(config_entries.OptionsFlowWithConfigEntry):
                             CONF_MANUAL_VENT_COUNT,
                             self.config_entry.data.get(CONF_MANUAL_VENT_COUNT, DEFAULT_MANUAL_VENT_COUNT),
                         ),
-                    ): vol.All(vol.Coerce(int), vol.Range(min=1, max=50)),
+                    ): _number_box(min_value=1, max_value=50),
                 }
             ),
             errors=errors,
@@ -476,25 +478,27 @@ class HvacVentOptimizerOptionsFlow(config_entries.OptionsFlowWithConfigEntry):
                 {
                     CONF_DAB_ENABLED: user_input[CONF_DAB_ENABLED],
                     CONF_DAB_FORCE_MANUAL: user_input[CONF_DAB_FORCE_MANUAL],
-                    CONF_CLOSE_INACTIVE_ROOMS: user_input[CONF_CLOSE_INACTIVE_ROOMS],
+                    CONF_OPEN_INACTIVE_ROOMS: bool(user_input[CONF_OPEN_INACTIVE_ROOMS]),
                     CONF_VENT_GRANULARITY: int(user_input[CONF_VENT_GRANULARITY]),
-                    CONF_POLL_INTERVAL_ACTIVE: user_input[CONF_POLL_INTERVAL_ACTIVE],
-                    CONF_POLL_INTERVAL_IDLE: user_input[CONF_POLL_INTERVAL_IDLE],
-                    CONF_INITIAL_EFFICIENCY_PERCENT: user_input[CONF_INITIAL_EFFICIENCY_PERCENT],
+                    CONF_POLL_INTERVAL_ACTIVE: int(user_input[CONF_POLL_INTERVAL_ACTIVE]),
+                    CONF_POLL_INTERVAL_IDLE: int(user_input[CONF_POLL_INTERVAL_IDLE]),
+                    CONF_INITIAL_EFFICIENCY_PERCENT: int(user_input[CONF_INITIAL_EFFICIENCY_PERCENT]),
                     CONF_NOTIFY_EFFICIENCY_CHANGES: user_input[CONF_NOTIFY_EFFICIENCY_CHANGES],
                     CONF_LOG_EFFICIENCY_CHANGES: user_input[CONF_LOG_EFFICIENCY_CHANGES],
                     CONF_CONTROL_STRATEGY: user_input[CONF_CONTROL_STRATEGY],
-                    CONF_MIN_ADJUSTMENT_PERCENT: user_input[CONF_MIN_ADJUSTMENT_PERCENT],
-                    CONF_MIN_ADJUSTMENT_INTERVAL: user_input[CONF_MIN_ADJUSTMENT_INTERVAL],
-                    CONF_TEMP_ERROR_OVERRIDE: user_input[CONF_TEMP_ERROR_OVERRIDE],
-                    CONF_DEADBAND_PERCENT: user_input[CONF_DEADBAND_PERCENT],
-                    CONF_DEVIATION_THRESHOLD: user_input[CONF_DEVIATION_THRESHOLD],
-                    CONF_MAX_RECALC_PER_CYCLE: user_input[CONF_MAX_RECALC_PER_CYCLE],
-                    CONF_MAX_ADJUSTMENT_BATCHES_PER_CYCLE: user_input[CONF_MAX_ADJUSTMENT_BATCHES_PER_CYCLE],
-                    CONF_MAX_ADJUSTMENT_BATCHES_PER_WINDOW: user_input[
-                        CONF_MAX_ADJUSTMENT_BATCHES_PER_WINDOW
-                    ],
-                    CONF_ADJUSTMENT_WINDOW_MINUTES: user_input[CONF_ADJUSTMENT_WINDOW_MINUTES],
+                    CONF_MIN_ADJUSTMENT_PERCENT: int(user_input[CONF_MIN_ADJUSTMENT_PERCENT]),
+                    CONF_MIN_ADJUSTMENT_INTERVAL: int(user_input[CONF_MIN_ADJUSTMENT_INTERVAL]),
+                    CONF_TEMP_ERROR_OVERRIDE: float(user_input[CONF_TEMP_ERROR_OVERRIDE]),
+                    CONF_DEADBAND_PERCENT: int(user_input[CONF_DEADBAND_PERCENT]),
+                    CONF_DEVIATION_THRESHOLD: float(user_input[CONF_DEVIATION_THRESHOLD]),
+                    CONF_MAX_RECALC_PER_CYCLE: int(user_input[CONF_MAX_RECALC_PER_CYCLE]),
+                    CONF_MAX_ADJUSTMENT_BATCHES_PER_CYCLE: int(
+                        user_input[CONF_MAX_ADJUSTMENT_BATCHES_PER_CYCLE]
+                    ),
+                    CONF_MAX_ADJUSTMENT_BATCHES_PER_WINDOW: int(
+                        user_input[CONF_MAX_ADJUSTMENT_BATCHES_PER_WINDOW]
+                    ),
+                    CONF_ADJUSTMENT_WINDOW_MINUTES: int(user_input[CONF_ADJUSTMENT_WINDOW_MINUTES]),
                     # New balance (DAB v2) tunables — clamped to documented
                     # ranges (R18.2) so a bad value can never reach the allocator.
                     CONF_SAFETY_FLOOR_PCT: _clamp_int(
@@ -553,8 +557,8 @@ class HvacVentOptimizerOptionsFlow(config_entries.OptionsFlowWithConfigEntry):
                         default=options.get(CONF_DAB_FORCE_MANUAL, DEFAULT_DAB_FORCE_MANUAL),
                     ): bool,
                     vol.Required(
-                        CONF_CLOSE_INACTIVE_ROOMS,
-                        default=options.get(CONF_CLOSE_INACTIVE_ROOMS, DEFAULT_CLOSE_INACTIVE_ROOMS),
+                        CONF_OPEN_INACTIVE_ROOMS,
+                        default=_resolve_open_inactive_default(options),
                     ): bool,
                     vol.Required(
                         CONF_VENT_GRANULARITY,
@@ -568,18 +572,18 @@ class HvacVentOptimizerOptionsFlow(config_entries.OptionsFlowWithConfigEntry):
                     vol.Required(
                         CONF_POLL_INTERVAL_ACTIVE,
                         default=options.get(CONF_POLL_INTERVAL_ACTIVE, DEFAULT_POLL_INTERVAL_ACTIVE),
-                    ): vol.All(vol.Coerce(int), vol.Range(min=1)),
+                    ): _number_box(min_value=1),
                     vol.Required(
                         CONF_POLL_INTERVAL_IDLE,
                         default=options.get(CONF_POLL_INTERVAL_IDLE, DEFAULT_POLL_INTERVAL_IDLE),
-                    ): vol.All(vol.Coerce(int), vol.Range(min=1)),
+                    ): _number_box(min_value=1),
                     vol.Required(
                         CONF_INITIAL_EFFICIENCY_PERCENT,
                         default=options.get(
                             CONF_INITIAL_EFFICIENCY_PERCENT,
                             DEFAULT_INITIAL_EFFICIENCY_PERCENT,
                         ),
-                    ): vol.All(vol.Coerce(int), vol.Range(min=0, max=100)),
+                    ): _number_box(min_value=0, max_value=100),
                     vol.Required(
                         CONF_NOTIFY_EFFICIENCY_CHANGES,
                         default=options.get(
@@ -609,79 +613,77 @@ class HvacVentOptimizerOptionsFlow(config_entries.OptionsFlowWithConfigEntry):
                             CONF_MIN_ADJUSTMENT_PERCENT,
                             DEFAULT_MIN_ADJUSTMENT_PERCENT,
                         ),
-                    ): vol.All(vol.Coerce(int), vol.Range(min=0, max=100)),
+                    ): _number_box(min_value=0, max_value=100),
                     vol.Required(
                         CONF_MIN_ADJUSTMENT_INTERVAL,
                         default=options.get(
                             CONF_MIN_ADJUSTMENT_INTERVAL,
                             DEFAULT_MIN_ADJUSTMENT_INTERVAL,
                         ),
-                    ): vol.All(vol.Coerce(int), vol.Range(min=0, max=240)),
+                    ): _number_box(min_value=0, max_value=240),
                     vol.Required(
                         CONF_TEMP_ERROR_OVERRIDE,
                         default=options.get(
                             CONF_TEMP_ERROR_OVERRIDE,
                             DEFAULT_TEMP_ERROR_OVERRIDE,
                         ),
-                    ): vol.All(vol.Coerce(float), vol.Range(min=0, max=5)),
+                    ): _number_box(min_value=0, max_value=5, step=0.1),
                     vol.Required(
                         CONF_DEADBAND_PERCENT,
                         default=options.get(
                             CONF_DEADBAND_PERCENT,
                             DEFAULT_DEADBAND_PERCENT,
                         ),
-                    ): vol.All(vol.Coerce(int), vol.Range(min=0, max=50)),
+                    ): _number_box(min_value=0, max_value=50),
                     vol.Required(
                         CONF_DEVIATION_THRESHOLD,
                         default=options.get(
                             CONF_DEVIATION_THRESHOLD,
                             DEFAULT_DEVIATION_THRESHOLD,
                         ),
-                    ): vol.All(vol.Coerce(float), vol.Range(min=0.1, max=2.0)),
+                    ): _number_box(min_value=0.1, max_value=2.0, step=0.1),
                     vol.Required(
                         CONF_MAX_RECALC_PER_CYCLE,
                         default=options.get(
                             CONF_MAX_RECALC_PER_CYCLE,
                             DEFAULT_MAX_RECALC_PER_CYCLE,
                         ),
-                    ): vol.All(vol.Coerce(int), vol.Range(min=1, max=10)),
+                    ): _number_box(min_value=1, max_value=10),
                     vol.Required(
                         CONF_MAX_ADJUSTMENT_BATCHES_PER_CYCLE,
                         default=options.get(
                             CONF_MAX_ADJUSTMENT_BATCHES_PER_CYCLE,
                             DEFAULT_MAX_ADJUSTMENT_BATCHES_PER_CYCLE,
                         ),
-                    ): vol.All(vol.Coerce(int), vol.Range(min=1, max=10)),
+                    ): _number_box(min_value=1, max_value=10),
                     vol.Required(
                         CONF_MAX_ADJUSTMENT_BATCHES_PER_WINDOW,
                         default=options.get(
                             CONF_MAX_ADJUSTMENT_BATCHES_PER_WINDOW,
                             DEFAULT_MAX_ADJUSTMENT_BATCHES_PER_WINDOW,
                         ),
-                    ): vol.All(vol.Coerce(int), vol.Range(min=1, max=20)),
+                    ): _number_box(min_value=1, max_value=20),
                     vol.Required(
                         CONF_ADJUSTMENT_WINDOW_MINUTES,
                         default=options.get(
                             CONF_ADJUSTMENT_WINDOW_MINUTES,
                             DEFAULT_ADJUSTMENT_WINDOW_MINUTES,
                         ),
-                    ): vol.All(vol.Coerce(int), vol.Range(min=5, max=720)),
+                    ): _number_box(min_value=5, max_value=720),
                     vol.Required(
                         CONF_SAFETY_FLOOR_PCT,
                         default=options.get(CONF_SAFETY_FLOOR_PCT, DEFAULT_SAFETY_FLOOR_PCT),
-                    ): vol.All(
-                        vol.Coerce(int),
-                        vol.Range(min=SAFETY_FLOOR_PCT_RANGE[0], max=SAFETY_FLOOR_PCT_RANGE[1]),
+                    ): _number_box(
+                        min_value=SAFETY_FLOOR_PCT_RANGE[0],
+                        max_value=SAFETY_FLOOR_PCT_RANGE[1],
                     ),
                     vol.Required(
                         CONF_SPREAD_GUARDRAIL_C,
                         default=options.get(CONF_SPREAD_GUARDRAIL_C, DEFAULT_SPREAD_GUARDRAIL_C),
-                    ): vol.All(
-                        vol.Coerce(float),
-                        vol.Range(
-                            min=SPREAD_GUARDRAIL_C_RANGE[0],
-                            max=SPREAD_GUARDRAIL_C_RANGE[1],
-                        ),
+                    ): _number_box(
+                        min_value=SPREAD_GUARDRAIL_C_RANGE[0],
+                        max_value=SPREAD_GUARDRAIL_C_RANGE[1],
+                        step=0.1,
                     ),
                     vol.Required(
                         CONF_SPREAD_IMPROVEMENT_DEADBAND_C,
@@ -689,12 +691,10 @@ class HvacVentOptimizerOptionsFlow(config_entries.OptionsFlowWithConfigEntry):
                             CONF_SPREAD_IMPROVEMENT_DEADBAND_C,
                             DEFAULT_SPREAD_IMPROVEMENT_DEADBAND_C,
                         ),
-                    ): vol.All(
-                        vol.Coerce(float),
-                        vol.Range(
-                            min=SPREAD_IMPROVEMENT_DEADBAND_C_RANGE[0],
-                            max=SPREAD_IMPROVEMENT_DEADBAND_C_RANGE[1],
-                        ),
+                    ): _number_box(
+                        min_value=SPREAD_IMPROVEMENT_DEADBAND_C_RANGE[0],
+                        max_value=SPREAD_IMPROVEMENT_DEADBAND_C_RANGE[1],
+                        step=0.1,
                     ),
                     vol.Required(
                         CONF_CROSSCOUPLING_ENABLED,
@@ -706,12 +706,9 @@ class HvacVentOptimizerOptionsFlow(config_entries.OptionsFlowWithConfigEntry):
                             CONF_AIRFLOW_LIMITED_MARGIN_PCT,
                             DEFAULT_AIRFLOW_LIMITED_MARGIN_PCT,
                         ),
-                    ): vol.All(
-                        vol.Coerce(int),
-                        vol.Range(
-                            min=AIRFLOW_LIMITED_MARGIN_PCT_RANGE[0],
-                            max=AIRFLOW_LIMITED_MARGIN_PCT_RANGE[1],
-                        ),
+                    ): _number_box(
+                        min_value=AIRFLOW_LIMITED_MARGIN_PCT_RANGE[0],
+                        max_value=AIRFLOW_LIMITED_MARGIN_PCT_RANGE[1],
                     ),
                     vol.Required(
                         CONF_AIRFLOW_LIMITED_ERROR_C,
@@ -719,22 +716,17 @@ class HvacVentOptimizerOptionsFlow(config_entries.OptionsFlowWithConfigEntry):
                             CONF_AIRFLOW_LIMITED_ERROR_C,
                             DEFAULT_AIRFLOW_LIMITED_ERROR_C,
                         ),
-                    ): vol.All(
-                        vol.Coerce(float),
-                        vol.Range(
-                            min=AIRFLOW_LIMITED_ERROR_C_RANGE[0],
-                            max=AIRFLOW_LIMITED_ERROR_C_RANGE[1],
-                        ),
+                    ): _number_box(
+                        min_value=AIRFLOW_LIMITED_ERROR_C_RANGE[0],
+                        max_value=AIRFLOW_LIMITED_ERROR_C_RANGE[1],
+                        step=0.1,
                     ),
                     vol.Required(
                         CONF_SHORT_CYCLE_GAP_MIN,
                         default=options.get(CONF_SHORT_CYCLE_GAP_MIN, DEFAULT_SHORT_CYCLE_GAP_MIN),
-                    ): vol.All(
-                        vol.Coerce(int),
-                        vol.Range(
-                            min=SHORT_CYCLE_GAP_MIN_RANGE[0],
-                            max=SHORT_CYCLE_GAP_MIN_RANGE[1],
-                        ),
+                    ): _number_box(
+                        min_value=SHORT_CYCLE_GAP_MIN_RANGE[0],
+                        max_value=SHORT_CYCLE_GAP_MIN_RANGE[1],
                     ),
                 }
             ),
@@ -915,8 +907,8 @@ class HvacVentOptimizerOptionsFlow(config_entries.OptionsFlowWithConfigEntry):
         for thermostat_id in thermostats:
             key = _safe_key("conv", thermostat_id)
             self._thermostat_key_map[key] = thermostat_id
-            data_schema[vol.Required(key, default=existing.get(thermostat_id, 0))] = vol.All(
-                vol.Coerce(int), vol.Range(min=0, max=MAX_CONVENTIONAL_VENTS)
+            data_schema[vol.Required(key, default=existing.get(thermostat_id, 0))] = _number_box(
+                min_value=0, max_value=MAX_CONVENTIONAL_VENTS
             )
 
         return self.async_show_form(
@@ -938,6 +930,42 @@ class HvacVentOptimizerOptionsFlow(config_entries.OptionsFlowWithConfigEntry):
 
 def _safe_key(prefix: str, entity_id: str) -> str:
     return f"{prefix}_{entity_id}".replace(".", "_")
+
+
+def _number_box(
+    *,
+    min_value: float | None = None,
+    max_value: float | None = None,
+    step: float = 1,
+) -> selector.NumberSelector:
+    """A numeric field rendered as a TEXTBOX (never a slider).
+
+    Home Assistant renders a plain voluptuous ``Range(min, max)`` numeric as a
+    drag slider, which is easy to nudge by accident (especially on touch). Using
+    ``NumberSelectorMode.BOX`` keeps the documented min/max validation but draws
+    a plain text input instead. ``step`` sets the accepted increment — pass a
+    fractional step (e.g. ``0.1``) for °C values.
+    """
+    config: dict[str, Any] = {"mode": selector.NumberSelectorMode.BOX, "step": step}
+    if min_value is not None:
+        config["min"] = min_value
+    if max_value is not None:
+        config["max"] = max_value
+    return selector.NumberSelector(selector.NumberSelectorConfig(**config))
+
+
+def _resolve_open_inactive_default(options: dict[str, Any]) -> bool:
+    """Default for the "open inactive rooms" toggle, honouring the legacy key.
+
+    Newest first: the new ``open_inactive_rooms`` key wins; otherwise the legacy
+    ``close_inactive_rooms`` is inverted (open = not close); otherwise the new
+    open-by-default applies.
+    """
+    if CONF_OPEN_INACTIVE_ROOMS in options:
+        return bool(options[CONF_OPEN_INACTIVE_ROOMS])
+    if CONF_CLOSE_INACTIVE_ROOMS in options:
+        return not bool(options[CONF_CLOSE_INACTIVE_ROOMS])
+    return DEFAULT_OPEN_INACTIVE_ROOMS
 
 
 def _clamp_int(value: Any, lo: int, hi: int, default: int) -> int:

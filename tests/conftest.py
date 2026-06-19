@@ -478,11 +478,25 @@ def _install_homeassistant() -> None:
         DROPDOWN = "dropdown"
         LIST = "list"
 
+    class NumberSelector(_SelectorBase): ...
+
+    class NumberSelectorConfig(dict):
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+
+    class NumberSelectorMode:
+        BOX = "box"
+        SLIDER = "slider"
+        AUTO = "auto"
+
     selector.EntitySelector = EntitySelector
     selector.EntitySelectorConfig = EntitySelectorConfig
     selector.SelectSelector = SelectSelector
     selector.SelectSelectorConfig = SelectSelectorConfig
     selector.SelectSelectorMode = SelectSelectorMode
+    selector.NumberSelector = NumberSelector
+    selector.NumberSelectorConfig = NumberSelectorConfig
+    selector.NumberSelectorMode = NumberSelectorMode
 
 
 _install_aiohttp()

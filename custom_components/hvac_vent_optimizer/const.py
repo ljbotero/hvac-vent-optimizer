@@ -18,7 +18,13 @@ CONF_STRUCTURE_NAME = "structure_name"
 CONF_ENTRY_ID = "entry_id"
 
 CONF_DAB_ENABLED = "dab_enabled"
-CONF_CLOSE_INACTIVE_ROOMS = "close_inactive_rooms"
+# Inactive-room airflow handling. The option is framed positively as "open vents
+# in rooms marked inactive" and defaults to ON (keep inactive vents open). This
+# is safer for forced-air duct static pressure and keeps room-efficiency learning
+# fresh for inactive rooms. The legacy ``close_inactive_rooms`` key (inverse
+# meaning) is kept for back-compat reads + the v2->v3 migration only.
+CONF_OPEN_INACTIVE_ROOMS = "open_inactive_rooms"
+CONF_CLOSE_INACTIVE_ROOMS = "close_inactive_rooms"  # legacy (pre-v3); migrated to CONF_OPEN_INACTIVE_ROOMS
 CONF_VENT_GRANULARITY = "vent_granularity"
 CONF_POLL_INTERVAL_ACTIVE = "poll_interval_active"
 CONF_POLL_INTERVAL_IDLE = "poll_interval_idle"
@@ -87,7 +93,11 @@ SERVICE_EXPORT_EFFICIENCY = "export_efficiency"
 SERVICE_IMPORT_EFFICIENCY = "import_efficiency"
 
 DEFAULT_DAB_ENABLED = False
-DEFAULT_CLOSE_INACTIVE_ROOMS = True
+# Inactive vents stay OPEN by default (R: see CONF_OPEN_INACTIVE_ROOMS). The
+# legacy default below (close=ON) is only used by the v2->v3 migration to
+# preserve the prior behaviour of installs that never set the option.
+DEFAULT_OPEN_INACTIVE_ROOMS = True
+DEFAULT_CLOSE_INACTIVE_ROOMS = True  # legacy (pre-v3) default; migration use only
 DEFAULT_VENT_GRANULARITY = 5
 DEFAULT_POLL_INTERVAL_ACTIVE = 3
 DEFAULT_POLL_INTERVAL_IDLE = 10

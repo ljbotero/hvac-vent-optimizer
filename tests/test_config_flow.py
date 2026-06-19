@@ -36,7 +36,7 @@ def _baseline_algorithm_input() -> dict:
     return {
         const.CONF_DAB_ENABLED: True,
         const.CONF_DAB_FORCE_MANUAL: True,
-        const.CONF_CLOSE_INACTIVE_ROOMS: True,
+        const.CONF_OPEN_INACTIVE_ROOMS: True,
         const.CONF_VENT_GRANULARITY: "5",
         const.CONF_POLL_INTERVAL_ACTIVE: 3,
         const.CONF_POLL_INTERVAL_IDLE: 10,
@@ -144,6 +144,7 @@ def test_algorithm_step_persists_balance_and_new_tunables():
     assert result["type"] == "create_entry"
     data = result["data"]
     assert data[const.CONF_CONTROL_STRATEGY] == "balance"
+    assert data[const.CONF_OPEN_INACTIVE_ROOMS] is True
     assert data[const.CONF_SAFETY_FLOOR_PCT] == 40
     assert data[const.CONF_SPREAD_GUARDRAIL_C] == 1.0
     assert data[const.CONF_SPREAD_IMPROVEMENT_DEADBAND_C] == 0.3
